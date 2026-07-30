@@ -31,10 +31,18 @@ CAT_VULN = "Vulnerability Scanning"
 CAT_TAKEOVER = "Subdomain Takeover"
 CAT_SCREENSHOT = "Screenshots"
 CAT_SECRETS = "Secret Scanning"
+CAT_OSINT = "OSINT / Attack Surface"
+CAT_API = "API & GraphQL"
+CAT_INJECT = "Injection Testing"
+CAT_TLS = "TLS / Transport"
+CAT_CMS = "CMS & Server Scanning"
+CAT_CLOUD = "Cloud & Storage"
+CAT_OOB = "Out-of-Band"
 
 CATEGORIES = [
-    CAT_SUBDOMAIN, CAT_PERMUTE, CAT_RESOLVE, CAT_PROBE, CAT_PORTS, CAT_CRAWL,
-    CAT_JS, CAT_PARAMS, CAT_CONTENT, CAT_VULN, CAT_TAKEOVER, CAT_SCREENSHOT,
+    CAT_SUBDOMAIN, CAT_PERMUTE, CAT_RESOLVE, CAT_PROBE, CAT_PORTS, CAT_OSINT,
+    CAT_CRAWL, CAT_JS, CAT_PARAMS, CAT_CONTENT, CAT_API, CAT_VULN, CAT_INJECT,
+    CAT_TAKEOVER, CAT_CLOUD, CAT_TLS, CAT_CMS, CAT_OOB, CAT_SCREENSHOT,
     CAT_SECRETS,
 ]
 
@@ -187,6 +195,150 @@ REGISTRY: tuple[Tool, ...] = (
        f"{GO}trufflesecurity/trufflehog/v3@latest"),
     _t("gitleaks", CAT_SECRETS, "Secret detection in git repos and files",
        f"{GO}gitleaks/gitleaks/v8@latest"),
+    _t("noseyparker", CAT_SECRETS, "High-signal secret detection with dedup",
+       "https://github.com/praetorian-inc/noseyparker/releases"),
+    _t("ripsecrets", CAT_SECRETS, "Fast pre-commit style secret scanner",
+       "cargo install ripsecrets"),
+
+    # --- Extra subdomain sources -------------------------------------------
+    _t("sublist3r", CAT_SUBDOMAIN, "Classic multi-engine subdomain enumerator",
+       "pipx install sublist3r"),
+    _t("knockpy", CAT_SUBDOMAIN, "Subdomain scanner with wordlist and API sources",
+       "pipx install knock-subdomains"),
+    _t("crobat", CAT_SUBDOMAIN, "Queries the Rapid7 Sonar dataset",
+       f"{GO}cgboal/sonarsearch/cmd/crobat@latest"),
+    _t("haktrails", CAT_SUBDOMAIN, "SecurityTrails subdomains and DNS history",
+       f"{GO}hakluke/haktrails@latest"),
+    _t("cero", CAT_SUBDOMAIN, "Scrapes domain names from TLS certificates",
+       f"{GO}glebarez/cero@latest"),
+    _t("subfinder-recursive", CAT_SUBDOMAIN, "Recursive subfinder pass over found hosts",
+       f"{GO}projectdiscovery/subfinder/v2/cmd/subfinder@latest"),
+    _t("alterx", CAT_PERMUTE, "Pattern-based subdomain permutation generator",
+       f"{GO}projectdiscovery/alterx/cmd/alterx@latest"),
+    _t("ripgen", CAT_PERMUTE, "Rust permutation generator, very fast",
+       "cargo install ripgen"),
+
+    # --- OSINT / attack surface --------------------------------------------
+    _t("asnmap", CAT_OSINT, "Maps an organisation's ASN to its IP ranges",
+       f"{GO}projectdiscovery/asnmap/cmd/asnmap@latest"),
+    _t("mapcidr", CAT_OSINT, "Expands and manipulates CIDR ranges",
+       f"{GO}projectdiscovery/mapcidr/cmd/mapcidr@latest"),
+    _t("cdncheck", CAT_OSINT, "Flags which hosts sit behind a CDN or WAF",
+       f"{GO}projectdiscovery/cdncheck/cmd/cdncheck@latest"),
+    _t("uncover", CAT_OSINT, "Pivots through Shodan, Censys, Fofa and ZoomEye",
+       f"{GO}projectdiscovery/uncover/cmd/uncover@latest"),
+    _t("tlsx", CAT_OSINT, "TLS grabber: SANs, issuers, expiry, JARM",
+       f"{GO}projectdiscovery/tlsx/cmd/tlsx@latest"),
+    _t("hakip2host", CAT_OSINT, "Turns IP ranges back into hostnames",
+       f"{GO}hakluke/hakip2host@latest"),
+    _t("dnsvalidator", CAT_OSINT, "Builds a clean, working resolver list",
+       "pipx install dnsvalidator"),
+    _t("gitdorker", CAT_OSINT, "GitHub dorking for leaked target data",
+       "https://github.com/obheda12/GitDorker"),
+
+    # --- More crawling ------------------------------------------------------
+    _t("waymore", CAT_CRAWL, "Deep archive pull: Wayback, CommonCrawl, AlienVault, URLScan",
+       "pipx install waymore"),
+    _t("gauplus", CAT_CRAWL, "Faster gau fork with more sources",
+       f"{GO}bp0lr/gauplus@latest"),
+    _t("xurlfind3r", CAT_CRAWL, "Passive URL discovery across many archives",
+       f"{GO}hueristiq/xurlfind3r/cmd/xurlfind3r@latest"),
+    _t("photon", CAT_CRAWL, "OSINT crawler that extracts intel while spidering",
+       "https://github.com/s0md3v/Photon"),
+    _t("cariddi", CAT_CRAWL, "Crawls for endpoints, secrets, tokens and errors",
+       f"{GO}edoardottt/cariddi/cmd/cariddi@latest"),
+
+    # --- More JS ------------------------------------------------------------
+    _t("jsleak", CAT_JS, "Finds links and secrets inside JavaScript",
+       f"{GO}channyein1337/jsleak@latest"),
+    _t("jsubfinder", CAT_JS, "Digs subdomains and secrets out of JS files",
+       f"{GO}ThreatUnkown/jsubfinder@latest"),
+    _t("sourcemapper", CAT_JS, "Reconstructs original source from .js.map files",
+       f"{GO}denandz/sourcemapper@latest"),
+
+    # --- More parameter discovery ------------------------------------------
+    _t("x8", CAT_PARAMS, "Hidden parameter discovery by response diffing",
+       "cargo install x8"),
+    _t("parameth", CAT_PARAMS, "Brute-forces GET and POST parameters",
+       "https://github.com/maK-/parameth"),
+
+    # --- More content discovery --------------------------------------------
+    _t("gobuster", CAT_CONTENT, "Directory, DNS and vhost brute-forcing",
+       f"{GO}OJ/gobuster/v3@latest"),
+    _t("wfuzz", CAT_CONTENT, "Highly configurable web fuzzer",
+       "pipx install wfuzz"),
+    _t("dirb", CAT_CONTENT, "Classic dictionary-based content scanner",
+       "apt install dirb"),
+
+    # --- API & GraphQL ------------------------------------------------------
+    _t("graphw00f", CAT_API, "Fingerprints the GraphQL engine in use",
+       "https://github.com/dolevf/graphw00f"),
+    _t("clairvoyance", CAT_API, "Recovers a GraphQL schema when introspection is off",
+       "pipx install clairvoyance"),
+    _t("inql", CAT_API, "GraphQL introspection and query generation",
+       "pipx install inql"),
+    _t("swagger-cli", CAT_API, "Validates and dereferences OpenAPI specs",
+       "npm install -g @apidevtools/swagger-cli"),
+    _t("jwt_tool", CAT_API, "JWT analysis: alg confusion, weak keys, claim tampering",
+       "https://github.com/ticarpi/jwt_tool"),
+
+    # --- Injection testing --------------------------------------------------
+    _t("ghauri", CAT_INJECT, "Modern SQL injection detection and exploitation",
+       "pipx install ghauri"),
+    _t("XSStrike", CAT_INJECT, "XSS scanner with context analysis and WAF fingerprinting",
+       "https://github.com/s0md3v/XSStrike"),
+    _t("kxss", CAT_INJECT, "Finds parameters that reflect XSS-relevant characters",
+       f"{GO}Emoe/kxss@latest"),
+    _t("Gxss", CAT_INJECT, "Checks which parameters reflect into the response",
+       f"{GO}KathanP19/Gxss@latest"),
+    _t("commix", CAT_INJECT, "Command injection detection and exploitation",
+       "https://github.com/commixproject/commix"),
+    _t("tplmap", CAT_INJECT, "Server-side template injection exploitation",
+       "https://github.com/epinna/tplmap"),
+    _t("SSRFmap", CAT_INJECT, "SSRF exploitation with an internal-service module set",
+       "https://github.com/swisskyrepo/SSRFmap"),
+    _t("ppfuzz", CAT_INJECT, "Client-side prototype pollution fuzzer",
+       "cargo install ppfuzz"),
+    _t("bxss", CAT_INJECT, "Blind XSS injection across parameters and headers",
+       f"{GO}ethicalhackingplayground/bxss@latest"),
+    _t("jaeles", CAT_VULN, "Signature-based web vulnerability scanner",
+       f"{GO}jaeles-project/jaeles@latest"),
+    _t("nikto", CAT_CMS, "Classic web server misconfiguration scanner",
+       "apt install nikto"),
+    _t("wpscan", CAT_CMS, "WordPress core, plugin and theme vulnerability scanner",
+       "gem install wpscan"),
+    _t("joomscan", CAT_CMS, "Joomla vulnerability scanner",
+       "https://github.com/OWASP/joomscan"),
+    _t("droopescan", CAT_CMS, "Drupal, SilverStripe and Joomla scanner",
+       "pipx install droopescan"),
+
+    # --- TLS / transport ----------------------------------------------------
+    _t("testssl.sh", CAT_TLS, "Thorough TLS configuration and cipher audit",
+       "https://github.com/drwetter/testssl.sh"),
+    _t("sslyze", CAT_TLS, "Fast TLS scanner with structured JSON output",
+       "pipx install sslyze"),
+
+    # --- Cloud & storage ----------------------------------------------------
+    _t("s3scanner", CAT_CLOUD, "Finds and tests open S3 buckets",
+       f"{GO}sa7mon/s3scanner@latest"),
+    _t("cloud_enum", CAT_CLOUD, "Enumerates public AWS, Azure and GCP assets",
+       "https://github.com/initstring/cloud_enum"),
+    _t("dnsReaper", CAT_TAKEOVER, "Subdomain takeover scanner with 50+ signatures",
+       "https://github.com/punk-security/dnsReaper"),
+    _t("tko-subs", CAT_TAKEOVER, "Takeover detection driven by a CNAME provider list",
+       f"{GO}anshumanbh/tko-subs@latest"),
+
+    # --- Out-of-band --------------------------------------------------------
+    _t("interactsh-client", CAT_OOB, "OOB interaction server for blind SSRF/RCE/XXE proof",
+       f"{GO}projectdiscovery/interactsh/cmd/interactsh-client@latest"),
+    _t("notify", CAT_OOB, "Streams findings to Slack, Discord or Telegram",
+       f"{GO}projectdiscovery/notify/cmd/notify@latest"),
+
+    # --- Extra port scanning ------------------------------------------------
+    _t("rustscan", CAT_PORTS, "Very fast port sweep that hands off to nmap",
+       "cargo install rustscan"),
+    _t("smap", CAT_PORTS, "Passive nmap-style results via Shodan, no packets sent",
+       f"{GO}s0md3v/smap/cmd/smap@latest"),
 )
 
 BY_NAME: dict[str, Tool] = {t.name: t for t in REGISTRY}

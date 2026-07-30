@@ -451,6 +451,9 @@ class Handler(BaseHTTPRequestHandler):
             ports=ports,
             output_dir=str(body.get("out") or os.path.join(os.getcwd(), "smarthunt-results")),
             authorized=True,
+            exhaustive=bool(body.get("exhaustive", False)),
+            max_rounds=as_int("rounds", 4, 1, 10),
+            collaborator=str(body.get("collaborator") or ""),
         )
         try:
             SESSION.start(config)

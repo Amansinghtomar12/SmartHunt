@@ -110,6 +110,8 @@ class ScanConfig:
     authorized: bool = False             # explicit user confirmation
     collaborator: str = ""               # host that observes SSRF callbacks
     use_sqlmap: bool = True              # only on an already-confirmed injection
+    exhaustive: bool = False             # loop discovery until nothing new appears
+    max_rounds: int = 4                  # safety stop for the exhaustive loop
 
     def wordlist_lines(self, path: str) -> list[str]:
         if not path or not os.path.isfile(path):
@@ -183,6 +185,7 @@ class Scanner:
         self._on_progress = on_progress or (lambda done, total: None)
         self._on_done = on_done or (lambda results, error: None)
         self.session = modules.make_session()
+        self._wildcard_ips = None   # cached across exhaustive rounds
 
     # --- control ----------------------------------------------------------
     def start(self):
@@ -215,6 +218,71 @@ class Scanner:
 
     def _enabled(self, key):
         return key in self.config.enabled_stages
+
+    def _apply_exhaustive_limits(self):
+        """Raise the per-stage caps that exist to keep a normal scan quick.
+
+        These caps are the difference between "a scan" and "the scan" — the
+        crawler stops at 300 pages, JS analysis at 400 files. Exhaustive mode
+        is the user saying they want coverage over wall-clock, so the ceilings
+        go up rather than away: an unbounded crawl on a large wildcard scope
+        never terminates, which is not the same thing as thorough.
+        """
+        cfg = self.config
+        if not cfg.exhaustive:
+            return
+        cfg.max_pages = max(cfg.max_pages, 5000)
+        cfg.max_js_files = max(cfg.max_js_files, 4000)
+        cfg.crawl_depth = max(cfg.crawl_depth, 4)
+        cfg.include_subdomains = True
+        cfg.bruteforce_subdomains = True
+        self.log("info", f"Exhaustive mode: crawl depth {cfg.crawl_depth}, "
+                         f"{cfg.max_pages} pages, {cfg.max_js_files} JS files, "
+                         f"up to {cfg.max_rounds} discovery rounds")
+
+    def _recurse_hosts(self, cfg, res, hosts, urls, live) -> set:
+        """Mine everything found so far for hostnames we have not seen yet.
+
+        Three sources, because they surface different things: hostnames sitting
+        in collected URLs, hostnames referenced inside JavaScript, and a fresh
+        permutation pass seeded by the subdomains discovered since round one.
+        """
+        found = set(hosts)
+        apex = cfg.target
+
+        # 1. hostnames embedded in every URL we have collected
+        for url in urls:
+            try:
+                netloc = re.sub(r":\d+$", "", (url.split("//", 1)[-1].split("/")[0]).lower())
+            except Exception:
+                continue
+            if netloc and (netloc == apex or netloc.endswith("." + apex)):
+                found.add(netloc)
+
+        # 2. hostnames named inside JS endpoints
+        for endpoint in res.js_endpoints:
+            for match in re.finditer(r"https?://([a-z0-9.\-]+)", endpoint, re.I):
+                host = match.group(1).lower()
+                if host == apex or host.endswith("." + apex):
+                    found.add(host)
+
+        # 3. permutation seeded by what this scan has actually seen, which is a
+        #    better wordlist than any static list for this particular target
+        if cfg.mode == MODE_WILDCARD and cfg.bruteforce_subdomains and len(found) > 1:
+            try:
+                permuted = modules._permute(apex, found, self.inv, self.log,
+                                            self.stop_event, cfg.threads)
+                # Same wildcard guard as the first pass — without it a
+                # wildcard-DNS target makes every round "discover" more hosts
+                # and the loop never converges.
+                if self._wildcard_ips is None:
+                    self._wildcard_ips = modules.detect_wildcard(
+                        apex, self.log, self.stop_event)
+                found |= modules._drop_wildcard_hits(
+                    permuted, self._wildcard_ips, self.log, self.stop_event, cfg.threads)
+            except Exception as exc:
+                self.log("warn", f"  permutation round failed: {exc}")
+        return found
 
     def _confirm_with_sqlmap(self, owasp_findings, findings):
         """Run sqlmap only where injection is already proven.
@@ -259,6 +327,7 @@ class Scanner:
             self.log("info", f"Stages: {', '.join(STAGE_TITLES[k] for k in planned) or 'none'}")
             self.log("info", "=" * 68)
             res.tools_used = sorted(self.inv.available)
+            self._apply_exhaustive_limits()
 
             hosts: set[str] = {cfg.target}
             live: dict[str, HostResult] = {}
@@ -436,6 +505,67 @@ class Scanner:
                 os.makedirs(outdir, exist_ok=True)
                 modules.screenshot(live, self.inv, self.log, self.stop_event, outdir)
                 end("screenshot")
+
+            # --- exhaustive: recurse until a round finds nothing new ---------
+            # Each round's discoveries are the next round's seeds: a subdomain
+            # found by permutation can host JS naming another subdomain, whose
+            # bundle names an API on a third. One pass stops at the first hop;
+            # this keeps going until the frontier is empty.
+            if cfg.exhaustive and not self.stop_event.is_set():
+                for round_no in range(2, cfg.max_rounds + 1):
+                    if self.stop_event.is_set():
+                        break
+                    before = (len(hosts), len(urls), len(live))
+                    self.log("stage", f"▶ Exhaustive round {round_no}/{cfg.max_rounds}")
+
+                    new_hosts = self._recurse_hosts(cfg, res, hosts, urls, live)
+                    fresh = new_hosts - hosts
+                    if fresh:
+                        self.log("found", f"  round {round_no}: {len(fresh)} new hosts")
+                        hosts |= fresh
+                        newly_live = modules.probe_http(
+                            sorted(fresh), self.inv, self.log, self.stop_event,
+                            self.session, threads=cfg.threads)
+                        live.update(newly_live)
+
+                    if "urls" in planned and not self.stop_event.is_set():
+                        more = modules.collect_urls(
+                            cfg.target, live, self.inv, self.log, self.stop_event,
+                            self.session, include_subs=True,
+                            crawl_depth=cfg.crawl_depth, max_pages=cfg.max_pages)
+                        urls |= more
+
+                    if "js" in planned and not self.stop_event.is_set():
+                        seeds = [hr.url or hr.host for hr in live.values()]
+                        js_urls = jsrecon.collect_js_urls(
+                            seeds, self.inv, self.log, self.stop_event, self.session,
+                            extra_urls=urls, threads=cfg.threads)
+                        if set(js_urls) - set(res.js_files):
+                            analysis = jsrecon.analyze_js(
+                                set(js_urls) - set(res.js_files), self.inv, self.log,
+                                self.stop_event, self.session, base_domain=cfg.target,
+                                threads=max(5, cfg.threads // 3),
+                                max_files=cfg.max_js_files)
+                            res.js_files = sorted(set(res.js_files) | set(js_urls))
+                            res.js_endpoints = sorted(set(res.js_endpoints)
+                                                      | set(analysis["endpoints"]))
+                            res.secrets += analysis["secrets"]
+                            urls |= {e for e in analysis["endpoints"] if e.startswith("http")}
+
+                    after = (len(hosts), len(urls), len(live))
+                    self.log("info", f"  round {round_no}: hosts {before[0]}->{after[0]}, "
+                                     f"URLs {before[1]}->{after[1]}, live {before[2]}->{after[2]}")
+                    if after == before:
+                        self.log("info", f"  converged after {round_no} rounds — "
+                                         f"nothing new to find")
+                        break
+
+                res.subdomains = sorted(hosts)
+                res.urls = sorted(urls)
+                if "endpoints" in planned and not self.stop_event.is_set():
+                    res.api_endpoints = jsrecon.verify_endpoints(
+                        res.js_endpoints, live, self.log, self.stop_event, self.session,
+                        threads=max(5, cfg.threads // 2))
 
             res.hosts = [hr.as_dict() for hr in sorted(live.values(), key=lambda h: h.host)]
             findings.sort(key=lambda f: SEVERITY_RANK.get(f.severity, 5))

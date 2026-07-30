@@ -88,6 +88,7 @@ def run_cli(args):
         ports=[int(p) for p in args.ports.split(",") if p.strip().isdigit()] if args.ports else [],
         output_dir=args.out, authorized=True,
         collaborator=args.collaborator, use_sqlmap=not args.no_sqlmap,
+        exhaustive=args.exhaustive, max_rounds=args.rounds,
     )
 
     def log(level, message):
@@ -172,6 +173,11 @@ def main():
     parser.add_argument("--no-brute", action="store_true", help="skip DNS bruteforce")
     parser.add_argument("--sub-wordlist", help="subdomain wordlist file")
     parser.add_argument("--content-wordlist", help="content-discovery wordlist file")
+    parser.add_argument("--exhaustive", "-E", action="store_true",
+                        help="leave nothing behind: raise every cap and loop "
+                             "discovery until a round finds nothing new")
+    parser.add_argument("--rounds", type=int, default=4,
+                        help="max discovery rounds for --exhaustive (default 4)")
     parser.add_argument("--collaborator", default="",
                         help="host that observes SSRF callbacks, e.g. your "
                              "Burp Collaborator or interactsh domain")

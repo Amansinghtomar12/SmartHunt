@@ -1,25 +1,31 @@
 /* SmartHunt web UI — dark theme matching the desktop app. */
 
 :root {
-  --bg: #0f172a;
-  --panel: #1e293b;
-  --panel-alt: #172033;
-  --line: #334155;
-  --fg: #e2e8f0;
-  --muted: #94a3b8;
-  --dim: #64748b;
-  --accent: #38bdf8;
-  --accent-deep: #0c4a6e;
-  --ok: #22c55e;
-  --warn: #f59e0b;
-  --err: #ef4444;
-  --found: #a78bfa;
-  --crit: #dc2626;
-  --high: #f97316;
-  --med: #eab308;
-  --low: #3b82f6;
-  --info: #94a3b8;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Phosphor-terminal palette: near-black CRT background, green primary,
+     cyan for structure, magenta for anything that demands attention. */
+  --bg: #050807;
+  --bg-deep: #020403;
+  --panel: #0a1410;
+  --panel-alt: #071009;
+  --line: #16341f;
+  --line-hot: #1f7a3d;
+  --fg: #c8f7d4;
+  --muted: #5f9d74;
+  --dim: #3a6b49;
+  --accent: #00ff9c;
+  --accent-2: #22d3ee;
+  --accent-deep: #04241a;
+  --ok: #00ff9c;
+  --warn: #ffb020;
+  --err: #ff3b5c;
+  --found: #ff5cf0;
+  --crit: #ff2d55;
+  --high: #ff7a1a;
+  --med: #ffd21e;
+  --low: #22d3ee;
+  --info: #5f9d74;
+  --glow: 0 0 6px rgba(0, 255, 156, .55);
+  --mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -27,7 +33,7 @@
 html, body {
   margin: 0; height: 100%;
   background: var(--bg); color: var(--fg);
-  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 13.5px/1.55 var(--mono);
 }
 
 body { display: flex; flex-direction: column; }
@@ -318,4 +324,193 @@ td code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   padding: 11px 13px; margin: 8px 0 14px; overflow-x: auto;
   font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
   color: var(--fg); white-space: pre;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HACKER SKIN — CRT scanlines, phosphor glow, terminal chrome.
+   Layered as overrides so the structural CSS above stays readable.
+   ═══════════════════════════════════════════════════════════════ */
+
+body {
+  background:
+    radial-gradient(ellipse at 50% -20%, rgba(0, 255, 156, .07), transparent 60%),
+    var(--bg);
+}
+
+/* Scanlines + vignette. pointer-events:none so it never eats a click. */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+    rgba(0, 20, 10, .22) 3px, rgba(0, 20, 10, .22) 4px);
+  mix-blend-mode: multiply;
+}
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+  box-shadow: inset 0 0 160px rgba(0, 0, 0, .85);
+}
+
+/* ── top bar as a terminal title line ─────────────────────── */
+.topbar {
+  border-bottom: 1px solid var(--line-hot);
+  background: linear-gradient(180deg, rgba(0,255,156,.05), transparent);
+}
+.name {
+  text-shadow: var(--glow); letter-spacing: .08em; text-transform: uppercase;
+}
+.logo { text-shadow: var(--glow); animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+.tagline::before { content: "// "; color: var(--dim); }
+.tagline { color: var(--muted); letter-spacing: .04em; }
+
+/* ── panels as bracketed terminal sections ────────────────── */
+.panel {
+  background: linear-gradient(180deg, rgba(0,255,156,.03), transparent);
+  border-color: var(--line);
+  position: relative;
+}
+.panel h2 { text-shadow: var(--glow); }
+.panel h2::before { content: "┌─ "; color: var(--dim); text-shadow: none; }
+.panel h2::after  { content: " ─┐"; color: var(--dim); text-shadow: none; }
+
+.pane h3 { text-shadow: var(--glow); }
+.pane h3::before { content: "▓▒░ "; color: var(--dim); text-shadow: none; }
+
+/* ── inputs ───────────────────────────────────────────────── */
+input[type=text], input[type=number], select {
+  background: var(--bg-deep); border-color: var(--line);
+  color: var(--accent); font-family: var(--mono);
+}
+input:focus, select:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--glow);
+}
+#target { letter-spacing: .06em; text-shadow: var(--glow); }
+#target::placeholder { color: var(--dim); }
+
+/* ── buttons: bracketed, glowing on hover ─────────────────── */
+.btn {
+  background: var(--bg-deep); border-color: var(--line-hot); color: var(--accent);
+  text-transform: uppercase; letter-spacing: .08em; font-size: 12px;
+  transition: all .14s;
+}
+.btn:hover:not(:disabled) {
+  background: var(--accent-deep); box-shadow: var(--glow); color: #eafff4;
+}
+.btn-start {
+  background: linear-gradient(180deg, #0b3d24, #06210f);
+  border-color: var(--accent); color: var(--accent); text-shadow: var(--glow);
+}
+.btn-start:hover:not(:disabled) { background: #0f5c34; box-shadow: 0 0 14px rgba(0,255,156,.6); }
+.btn-stop {
+  background: linear-gradient(180deg, #4a0d18, #250509);
+  border-color: var(--crit); color: #ff8fa3; text-shadow: 0 0 6px rgba(255,45,85,.6);
+}
+.btn-stop:hover:not(:disabled) { background: #6d1222; box-shadow: 0 0 14px rgba(255,45,85,.55); }
+.btn-accent { background: #052b33; border-color: var(--accent-2); color: var(--accent-2); }
+.btn-accent:hover:not(:disabled) { background: #07404d; box-shadow: 0 0 12px rgba(34,211,238,.5); }
+
+/* ── mode cards ───────────────────────────────────────────── */
+.mode-card { background: var(--bg-deep); }
+.mode-card.selected {
+  background: var(--accent-deep); border-color: var(--accent);
+  box-shadow: inset 0 0 22px rgba(0,255,156,.10), var(--glow);
+}
+.mode-card.selected .mode-title { color: var(--accent); text-shadow: var(--glow); }
+.mode-card.selected .mode-sub { color: var(--muted); }
+.mode-card.selected .dot { box-shadow: 0 0 8px var(--accent); }
+
+/* ── progress: segmented loader ───────────────────────────── */
+.progress { background: var(--bg-deep); border: 1px solid var(--line); height: 10px; }
+.progress-bar {
+  background: repeating-linear-gradient(90deg,
+    var(--accent) 0 8px, rgba(0,255,156,.35) 8px 12px);
+  box-shadow: var(--glow);
+}
+.stage-text { color: var(--accent); text-shadow: var(--glow); letter-spacing: .04em; }
+.stage-text::before { content: "> "; color: var(--dim); text-shadow: none; }
+
+/* ── tabs ─────────────────────────────────────────────────── */
+.tabs { border-bottom-color: var(--line-hot); }
+.tab { text-transform: uppercase; letter-spacing: .06em; font-size: 11.5px; }
+.tab.active { text-shadow: var(--glow); background: rgba(0,255,156,.06); }
+.badge { background: var(--bg-deep); border: 1px solid var(--line); }
+.tab.active .badge { border-color: var(--accent); color: var(--accent); }
+
+/* ── tables ───────────────────────────────────────────────── */
+.table-wrap { border-color: var(--line); background: var(--bg-deep); }
+th { background: var(--bg-deep); text-shadow: var(--glow); border-bottom-color: var(--line-hot);
+     text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+tbody tr:nth-child(even) { background: rgba(0,255,156,.025); }
+tbody tr:hover { background: rgba(0,255,156,.09); box-shadow: inset 2px 0 0 var(--accent); }
+td { border-bottom-color: var(--line); }
+td a { color: var(--accent-2); }
+
+.pill { border-radius: 2px; text-shadow: none; }
+.pill.critical { box-shadow: 0 0 8px rgba(255,45,85,.6); }
+.pill.high { box-shadow: 0 0 8px rgba(255,122,26,.5); }
+
+/* ── module list ──────────────────────────────────────────── */
+.stage-row { font-size: 12.5px; }
+.stage-state.running { text-shadow: var(--glow); animation: pulse 1s linear infinite; }
+.stage-state.done { text-shadow: var(--glow); }
+.pipe-row.running { text-shadow: var(--glow); }
+
+/* ── log: a real terminal ─────────────────────────────────── */
+.log, .list {
+  background: var(--bg-deep); border-color: var(--line);
+  text-shadow: 0 0 3px rgba(0,255,156,.28);
+}
+.log .l-stage { text-shadow: var(--glow); }
+.log .l-found { color: var(--found); text-shadow: 0 0 6px rgba(255,92,240,.6); }
+.log::after {
+  content: "█"; color: var(--accent);
+  animation: blink 1.05s steps(1) infinite;
+}
+@keyframes blink { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+
+/* ── dashboard cards as readouts ──────────────────────────── */
+.card {
+  background: var(--bg-deep); border-color: var(--line);
+  position: relative; overflow: hidden;
+}
+.card::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--accent);
+  box-shadow: var(--glow);
+}
+.card .num { text-shadow: var(--glow); }
+.card .lbl { letter-spacing: .1em; }
+
+/* ── report ───────────────────────────────────────────────── */
+.md h2 { color: var(--accent); text-shadow: var(--glow); }
+.md h2::before { content: "[!] "; color: var(--crit); }
+.md-code { background: var(--bg-deep); border-color: var(--line-hot); }
+.md code { background: var(--bg-deep); border-color: var(--line); }
+.report-kind.ok { box-shadow: 0 0 10px rgba(0,255,156,.45); }
+
+/* ── status bar ───────────────────────────────────────────── */
+.statusbar {
+  border-top-color: var(--line-hot);
+  background: linear-gradient(0deg, rgba(0,255,156,.05), transparent);
+}
+#status::before { content: "[*] "; color: var(--accent); }
+
+/* ── modal ────────────────────────────────────────────────── */
+.modal {
+  background: var(--panel); border-color: var(--crit);
+  box-shadow: 0 0 40px rgba(255,45,85,.25);
+}
+.modal h3 { color: var(--crit); text-shadow: 0 0 8px rgba(255,45,85,.6); }
+.modal h3::before { content: "⚠ "; }
+
+/* ── ASCII banner ─────────────────────────────────────────── */
+.ascii {
+  font-family: var(--mono); font-size: 9px; line-height: 1.05; white-space: pre;
+  color: var(--accent); text-shadow: var(--glow); opacity: .9; margin: 0;
+}
+@media (max-width: 1100px) { .ascii { display: none; } }
+
+/* Honour a user's reduced-motion preference — the CRT effects are decoration. */
+@media (prefers-reduced-motion: reduce) {
+  .logo, .stage-state.running, .log::after { animation: none; }
+  body::after { display: none; }
 }

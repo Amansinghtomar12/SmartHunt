@@ -33,7 +33,8 @@ python smarthunt.py                  # launch the desktop GUI
 
 That's it. **No external tools are required** — SmartHunt ships pure-Python
 implementations of every stage. Installing the optional tools below makes it
-faster and deeper, but it produces real results out of the box.
+faster and deeper, but it produces real results out of the box. The arsenal
+covers **112 tools across 20 categories** — see `install-tools.sh`.
 
 ### Browser mode
 
@@ -158,6 +159,44 @@ every live host and probes it, because staging subdomains routinely expose an AP
 that production does not. What comes back — with status, content type and allowed
 methods — is the real, callable attack surface, and it feeds straight into the
 OWASP stage.
+
+## Exhaustive mode — nothing left behind
+
+```bash
+python smarthunt.py --cli '*.example.com' --exhaustive        # or -E
+python smarthunt.py --cli example.com -E --rounds 6
+```
+
+A normal scan has caps that keep it quick: the crawler stops at 300 pages, JS
+analysis at 400 files. `--exhaustive` raises them and, more importantly, turns
+discovery into a **loop that runs until a round finds nothing new**.
+
+Each round's discoveries seed the next. A subdomain found by permutation hosts
+JavaScript naming a second subdomain, whose bundle names an API on a third — a
+single pass stops at the first hop. Every round re-mines three sources:
+hostnames embedded in collected URLs, hostnames referenced inside JavaScript,
+and a fresh permutation pass seeded by what *this scan* has actually seen (a
+better wordlist for this target than any static list). When a round adds no
+hosts, no URLs and no live services, it has converged and stops.
+
+```
+▶ Exhaustive round 2/3
+  round 2: hosts 1->53, URLs 170->814, live 1->52
+▶ Exhaustive round 3/3
+  round 3: hosts 53->53, URLs 814->814, live 52->52
+  converged after 3 rounds — nothing new to find
+```
+
+The ceilings go up rather than away, and `--rounds` bounds the loop, because an
+unbounded crawl over a large wildcard scope never terminates — which is not the
+same thing as thorough.
+
+**Wildcard DNS is detected first.** Many domains answer *every* name, so
+bruteforce and permutation would otherwise "find" thousands of hosts that do not
+exist — and in exhaustive mode that becomes an infinite supply of garbage.
+SmartHunt queries names nobody would register, learns the wildcard's addresses,
+and drops any guessed host that only resolves there. Hosts from passive sources
+are kept, because something attested to those.
 
 ## Every tool, not the first one that matches
 

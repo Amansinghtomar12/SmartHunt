@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover
     requests = None  # type: ignore
     _HAVE_REQUESTS = False
 
-from . import sources, wordlists
+from . import extra_tools, sources, wordlists
 from .tools import ToolInventory, run
 
 USER_AGENT = "SmartHunt/1.0 (+recon)"
@@ -148,18 +148,28 @@ def enumerate_subdomains(domain, inv: ToolInventory, wordlist, log, stop,
         elif code not in (0, 124):
             log("warn", f"  {tool} failed: {err.strip()[:120]}")
 
+    # --- the wider arsenal (sublist3r, crobat, haktrails, cero, …) --------
+    if not stop.is_set():
+        found |= extra_tools.run_stage(
+            extra_tools.S_SUBDOMAIN, {"domain": domain}, inv, log, stop)
+
     # --- passive OSINT sources (always run — pure Python) -----------------
     if not stop.is_set():
         log("info", "Querying passive sources (crt.sh, OTX, urlscan, wayback, ...)")
         found |= sources.gather_subdomains(domain, log, stop)
 
+    # Anything guessed rather than attested has to survive the wildcard check.
+    wildcard_ips = detect_wildcard(domain, log, stop)
+
     # --- DNS bruteforce ----------------------------------------------------
     if use_bruteforce and not stop.is_set():
-        found |= _bruteforce(domain, wordlist, inv, log, stop, threads)
+        guessed = _bruteforce(domain, wordlist, inv, log, stop, threads)
+        found |= _drop_wildcard_hits(guessed, wildcard_ips, log, stop, threads)
 
     # --- permutation of what we already have -------------------------------
     if not stop.is_set() and len(found) > 1:
-        found |= _permute(domain, found, inv, log, stop, threads)
+        permuted = _permute(domain, found, inv, log, stop, threads)
+        found |= _drop_wildcard_hits(permuted, wildcard_ips, log, stop, threads)
 
     return {h for h in found if h and (h == domain or h.endswith("." + domain))}
 
@@ -230,7 +240,8 @@ def _permute(domain, known, inv, log, stop, threads):
         "dnsgen": ["dnsgen", "-"],
         "altdns": ["altdns", "-i", "/dev/stdin", "-o", "/dev/stdout"],
     }
-    generated: set[str] = set()
+    generated: set[str] = set(extra_tools.run_stage(
+        extra_tools.S_PERMUTE, {"domain": domain, "hosts": known}, inv, log, stop))
     for tool, cmd in commands.items():
         if stop.is_set() or not inv.has(tool):
             continue
@@ -270,6 +281,56 @@ def _permute(domain, known, inv, log, stop, threads):
 # --------------------------------------------------------------------------- #
 # Stage: DNS resolution + wildcard detection
 # --------------------------------------------------------------------------- #
+def detect_wildcard(domain, log, stop, samples: int = 4) -> set[str]:
+    """Return the IPs a wildcard DNS record answers with, or an empty set.
+
+    Plenty of domains answer *every* name — ``*.example.com`` resolving to one
+    parking IP. Without this check, bruteforce and permutation "discover"
+    thousands of hosts that do not exist, and exhaustive mode turns that into
+    an unbounded supply of garbage. Query names nobody would ever register; if
+    they answer, every address they return belongs to the wildcard.
+    """
+    wildcard_ips: set[str] = set()
+    for i in range(samples):
+        if stop.is_set():
+            return set()
+        probe = f"smarthunt-wildcard-probe-{i}-{abs(hash((domain, i))) % 10**8}.{domain}"
+        try:
+            wildcard_ips |= {info[4][0] for info in socket.getaddrinfo(probe, None)}
+        except Exception:
+            return set()   # a name that should not resolve did not: no wildcard
+    if wildcard_ips:
+        log("warn", f"Wildcard DNS on *.{domain} -> {', '.join(sorted(wildcard_ips))}; "
+                    f"bruteforce and permutation hits matching it will be dropped")
+    return wildcard_ips
+
+
+def _drop_wildcard_hits(candidates, wildcard_ips, log, stop, threads=60) -> set[str]:
+    """Remove hosts that only resolve to the wildcard address."""
+    if not wildcard_ips or not candidates:
+        return set(candidates)
+
+    def check(host):
+        if stop.is_set():
+            return None
+        try:
+            ips = {info[4][0] for info in socket.getaddrinfo(host, None)}
+        except Exception:
+            return None
+        # Resolves somewhere the wildcard does not -> a real, distinct host.
+        return host if ips - wildcard_ips else None
+
+    kept = set()
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        for host in pool.map(check, list(candidates)):
+            if host:
+                kept.add(host)
+    dropped = len(candidates) - len(kept)
+    if dropped:
+        log("info", f"  dropped {dropped} wildcard-DNS false positives")
+    return kept
+
+
 def resolve_hosts(hosts, inv, log, stop, threads=60):
     """Resolve hosts to IPs and CNAMEs. Returns ``{host: (ips, cname)}``."""
     hosts = list(hosts)
@@ -533,6 +594,14 @@ def collect_urls(domain, live_results, inv, log, stop, session,
     scoped = {u for u in urls if _in_scope(u, domain, include_subs)}
     log("info", f"URL collection: {len(scoped)} in-scope URLs ({len(urls)} total seen)")
     return scoped
+
+
+def collect_extra_urls(domain, live_results, inv, log, stop) -> set[str]:
+    """Archive and crawler tools beyond the built-in set."""
+    ctx = {"domain": domain,
+           "live_urls": [r.url for r in live_results.values() if r.url]}
+    return {u for u in extra_tools.run_stage(extra_tools.S_URLS, ctx, inv, log, stop)
+            if u.startswith("http")}
 
 
 def _in_scope(url, domain, include_subs):
