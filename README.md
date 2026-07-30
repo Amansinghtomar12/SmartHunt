@@ -19,30 +19,112 @@ elapsed clock advancing, counters climbing, then the triaged report.</sub>
 
 ---
 
-## Quick start
+## Setup
+
+New to this? Follow these five steps exactly — they take about two minutes.
+
+### 1. Check you have Python 3.9 or newer
+
+```bash
+python3 --version
+```
+
+If that prints `Python 3.9` or higher, you're fine. If the command isn't found,
+install Python from [python.org/downloads](https://www.python.org/downloads/)
+(tick **"Add Python to PATH"** on Windows), then reopen your terminal.
+
+> On Windows, use `python` instead of `python3` in every command below.
+
+### 2. Download SmartHunt
 
 ```bash
 git clone https://github.com/Amansinghtomar12/SmartHunt
 cd SmartHunt
-pip install -r requirements.txt      # just `requests`
-
-python smarthunt.py --web            # browser UI at http://127.0.0.1:8777
-python smarthunt.py                  # desktop app
-python smarthunt.py --cli example.com
 ```
 
-**No external tools are required.** SmartHunt ships a pure-Python implementation
-of every stage, so a fresh clone produces real results with zero setup. It also
-detects and drives **112 optional tools across 20 categories** — see
-`install-tools.sh` — and gets faster and deeper with each one you install.
+No `git`? Click the green **Code** button at the top of this page →
+**Download ZIP**, unzip it, then `cd` into the folder.
 
-If the desktop app complains about Tkinter:
+### 3. Install the one dependency
 
 ```bash
-sudo apt install python3-tk       # Debian / Ubuntu
-sudo dnf install python3-tkinter  # Fedora / RHEL
-brew install python-tk            # macOS
+pip install -r requirements.txt
 ```
+
+That installs `requests`. Nothing else is required.
+
+<details>
+<summary>Recommended: install into a virtual environment instead</summary>
+
+Keeps SmartHunt's dependency out of your system Python. Some Linux distros
+require this and will refuse a plain `pip install`.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Run `source .venv/bin/activate` each time you open a new terminal.
+</details>
+
+### 4. Start it
+
+Pick whichever you prefer — all three run the same engine.
+
+```bash
+python3 smarthunt.py --web       # browser UI, then open http://127.0.0.1:8777
+python3 smarthunt.py             # desktop app
+python3 smarthunt.py --cli example.com
+```
+
+**If you're not sure, use `--web`.** It works everywhere, needs nothing extra,
+and you drive it from your browser.
+
+### 5. Run your first scan
+
+1. Type a domain you own or are authorised to test — e.g. `example.com`
+2. Press **START**
+3. Confirm the authorization prompt
+4. When it finishes, read the **Report** tab
+
+Results are also written to `smarthunt-results/` next to the project folder.
+
+---
+
+## Troubleshooting
+
+| Message | What to do |
+|---|---|
+| `ModuleNotFoundError: No module named 'requests'` | You skipped step 3, or you're in a different terminal than the one where you activated the venv. Re-run `pip install -r requirements.txt`. |
+| `error: externally-managed-environment` | Your distro blocks system-wide pip. Use the virtual environment shown in step 3. |
+| `Tkinter is not installed` | Only affects the desktop app. Either use `--web` instead, or install it: `sudo apt install python3-tk` (Debian/Ubuntu), `sudo dnf install python3-tkinter` (Fedora), `brew install python-tk` (macOS). |
+| `Address already in use` | Something else is on port 8777. Use another: `python3 smarthunt.py --web --port 9000`. |
+| `python3: command not found` | Try `python`. On Windows that's the normal name. |
+| Browser shows nothing at 127.0.0.1:8777 | Check the terminal is still running the server — it must stay open. Don't use `localhost:` with a different port than the one printed. |
+| `0/112 external tools found` | Expected and fine. Every stage has a pure-Python fallback. Install optional tools later with `./install-tools.sh`. |
+| Scan finds nothing | Confirm the domain resolves and is reachable, and that you typed it without `https://`. |
+
+Still stuck? Run `python3 smarthunt.py --tools` — if that prints a tool list,
+your install is working and the problem is with the target or the network.
+
+---
+
+## Optional: more tools, deeper results
+
+**Nothing below is required.** SmartHunt ships a pure-Python implementation of
+every stage, so a fresh clone produces real results with zero setup. It also
+detects and drives **112 optional tools across 20 categories**, and gets faster
+and deeper with each one you install.
+
+```bash
+./install-tools.sh          # installs what it can; skips what it can't
+python3 smarthunt.py --tools   # shows which ones were found
+```
+
+Most need Go, Python or Rust already present. Install a handful you care about
+rather than all 112 — `subfinder`, `httpx`, `katana` and `nuclei` alone make a
+large difference.
 
 ---
 
