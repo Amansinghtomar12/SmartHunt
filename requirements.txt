@@ -1,0 +1,5 @@
+# SmartHunt runtime dependencies.
+#
+# Only `requests` is needed — every recon stage has a pure-Python implementation.
+# Tkinter ships with most Python installs; if it is missing see the README.
+requests>=2.25.0

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# SmartHunt scan output — results contain live target data, never commit them
+smarthunt-results/
+results/
+screenshots/
+*.xwd
+
+# Wordlists people drop in locally
+wordlists/
+*.wordlist
+
+# Credentials
+.env
+.env.*
+*.key
+*.pem
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
