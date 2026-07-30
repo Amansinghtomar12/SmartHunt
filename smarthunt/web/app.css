@@ -566,13 +566,12 @@ td a { color: var(--accent-2); }
 @keyframes sweep { 0% { transform: translateX(-60%) } 100% { transform: translateX(60%) } }
 
 /* cards animate in as results arrive */
-.card { animation: cardIn .38s ease both; }
-.card:nth-child(2) { animation-delay: .04s } .card:nth-child(3) { animation-delay: .08s }
-.card:nth-child(4) { animation-delay: .12s } .card:nth-child(5) { animation-delay: .16s }
-.card:nth-child(6) { animation-delay: .20s } .card:nth-child(7) { animation-delay: .24s }
-.card:nth-child(8) { animation-delay: .28s } .card:nth-child(9) { animation-delay: .32s }
+/* No fill-mode and no opacity:0 resting state — the card is legible whether or
+   not the animation ever runs. A stat you cannot read is worse than one that
+   does not slide in. */
+.card { animation: cardIn .38s ease; }
 @keyframes cardIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: .25; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }
 }
 
@@ -601,7 +600,7 @@ td a { color: var(--accent-2); }
 }
 
 /* the report headline arrives rather than appearing */
-.md h2 { animation: cardIn .5s ease both; }
+.md h2 { animation: cardIn .5s ease; }
 
 @media (prefers-reduced-motion: reduce) {
   #matrix { display: none; }

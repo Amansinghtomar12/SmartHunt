@@ -83,6 +83,10 @@ function countUp(el, target, duration = 620) {
     el.textContent = target;
     return;
   }
+  // The element already shows the real value. Only drop it to 0 once we know
+  // the animation is actually going to run, so a throttled rAF (background
+  // tab, reduced-power mode) can never leave a stat reading zero.
+  el.textContent = '0';
   const start = performance.now();
   function step(now) {
     const t = Math.min(1, (now - start) / duration);

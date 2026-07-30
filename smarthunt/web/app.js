@@ -345,7 +345,8 @@ function renderResults(res) {
   const stats = res.stats || {};
 
   $('#cards').innerHTML = CARD_LABELS.map((label) =>
-    `<div class="card"><div class="num" data-value="${esc(stats[label] ?? 0)}">0</div>
+    `<div class="card"><div class="num" data-value="${esc(stats[label] ?? 0)}"
+      >${esc(stats[label] ?? 0)}</div>
      <div class="lbl">${esc(label)}</div></div>`).join('');
   if (window.SmartHuntFX) SmartHuntFX.animateCards($('#cards'));
 
