@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmartHunt — Bug Hunting Recon Suite</title>
+<!-- stamped per server process; required on every mutating request -->
+<meta name="smarthunt-token" content="__SMARTHUNT_TOKEN__">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⬢</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">⬢</span>
+    <span class="name">SmartHunt</span>
+    <span class="tagline">bug-hunting recon suite</span>
+  </div>
+  <div class="topbar-right">
+    <span id="toolCount" class="muted">⚙ … tools</span>
+    <button id="rescanTools" class="btn btn-sm">Re-scan tools</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ────────────────────────── sidebar ────────────────────────── -->
+  <aside class="sidebar">
+
+    <section class="panel">
+      <h2>Target</h2>
+      <div class="modes">
+        <div class="mode-card selected" data-mode="domain" role="radio" tabindex="0" aria-checked="true">
+          <span class="dot"></span>
+          <div>
+            <div class="mode-title">Single Domain <span class="mode-eg">— example.com</span></div>
+            <div class="mode-sub">Deep-dive one host: JavaScript, endpoints, parameters, content, vulns.</div>
+          </div>
+        </div>
+        <div class="mode-card" data-mode="wildcard" role="radio" tabindex="0" aria-checked="false">
+          <span class="dot"></span>
+          <div>
+            <div class="mode-title">Wildcard <span class="mode-eg">— *.example.com</span></div>
+            <div class="mode-sub">Full recon: every subdomain source and tool, then go deep on what's live.</div>
+          </div>
+        </div>
+      </div>
+      <input id="target" type="text" placeholder="example.com" autocomplete="off" spellcheck="false">
+      <div id="targetHint" class="hint"></div>
+    </section>
+
+    <div class="controls">
+      <button id="startBtn" class="btn btn-start">▶ START</button>
+      <button id="stopBtn" class="btn btn-stop" disabled>■ STOP</button>
+      <button id="pauseBtn" class="btn btn-pause" disabled title="Pause / resume">Pause</button>
+    </div>
+
+    <section class="panel">
+      <h2>Modules</h2>
+      <div id="stageList" class="stage-list"></div>
+      <div class="btn-row">
+        <button class="btn btn-sm" data-stages="all">All</button>
+        <button class="btn btn-sm" data-stages="none">None</button>
+        <button class="btn btn-sm" data-stages="default">Defaults</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Options</h2>
+      <label class="field"><span>Threads</span><input id="optThreads" type="number" value="40" min="1" max="500"></label>
+      <label class="field"><span>Crawl depth</span><input id="optDepth" type="number" value="2" min="1" max="5"></label>
+      <label class="field"><span>Max pages</span><input id="optPages" type="number" value="300" min="10" max="20000"></label>
+      <label class="field"><span>Max JS files</span><input id="optJs" type="number" value="400" min="10" max="20000"></label>
+      <label class="field"><span>Ports</span><input id="optPorts" type="text" placeholder="blank = top ports"></label>
+      <label class="field"><span>nuclei severity</span>
+        <select id="optSeverity">
+          <option>info,low,medium,high,critical</option>
+          <option selected>low,medium,high,critical</option>
+          <option>medium,high,critical</option>
+          <option>high,critical</option>
+          <option>critical</option>
+        </select>
+      </label>
+      <label class="check"><input id="optBrute" type="checkbox" checked><span>DNS bruteforce subdomains</span></label>
+      <label class="check"><input id="optSubs" type="checkbox" checked><span>Include subdomains in URL collection</span></label>
+    </section>
+
+    <section class="panel">
+      <h2>Wordlists <span class="muted-sm">(optional)</span></h2>
+      <label class="field"><span>Subdomains</span><input id="optSubWl" type="text" placeholder="built-in"></label>
+      <label class="field"><span>Content paths</span><input id="optContentWl" type="text" placeholder="built-in"></label>
+      <div class="muted-sm">Server-side paths — blank uses the built-in lists.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Output</h2>
+      <label class="field"><span>Directory</span><input id="optOut" type="text"></label>
+      <div class="btn-row">
+        <button id="exportBtn" class="btn btn-accent" disabled>Export all</button>
+        <button id="reportBtn" class="btn btn-sm" disabled>Open report</button>
+      </div>
+      <div id="exportHint" class="muted-sm"></div>
+    </section>
+  </aside>
+
+  <!-- ────────────────────────── main ────────────────────────── -->
+  <main class="main">
+    <div class="progress-head">
+      <div id="stageText" class="stage-text">Idle — enter a target and press START</div>
+      <div id="elapsed" class="muted"></div>
+    </div>
+    <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="findings">Findings <span class="badge" id="b-findings">0</span></button>
+      <button class="tab" data-tab="secrets">Secrets <span class="badge" id="b-secrets">0</span></button>
+      <button class="tab" data-tab="hosts">Hosts <span class="badge" id="b-hosts">0</span></button>
+      <button class="tab" data-tab="subdomains">Subdomains <span class="badge" id="b-subdomains">0</span></button>
+      <button class="tab" data-tab="urls">URLs <span class="badge" id="b-urls">0</span></button>
+      <button class="tab" data-tab="js">JS <span class="badge" id="b-js">0</span></button>
+      <button class="tab" data-tab="endpoints">Endpoints <span class="badge" id="b-endpoints">0</span></button>
+      <button class="tab" data-tab="params">Params <span class="badge" id="b-params">0</span></button>
+      <button class="tab" data-tab="content">Content <span class="badge" id="b-content">0</span></button>
+      <button class="tab" data-tab="log">Log</button>
+      <button class="tab" data-tab="arsenal">Arsenal</button>
+    </nav>
+
+    <section class="pane active" id="pane-dashboard">
+      <h3>Scan summary</h3>
+      <div id="cards" class="cards"></div>
+      <div class="split">
+        <div>
+          <h3>Pipeline</h3>
+          <div id="pipeline" class="pipeline"></div>
+        </div>
+        <div>
+          <h3>Findings by severity</h3>
+          <div id="sevList" class="sev-list"></div>
+          <p class="muted note">Authorized testing only — scan targets you own or have written
+             permission to test.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="pane" id="pane-findings"></section>
+    <section class="pane" id="pane-secrets"></section>
+    <section class="pane" id="pane-hosts"></section>
+    <section class="pane" id="pane-subdomains"></section>
+    <section class="pane" id="pane-urls"></section>
+    <section class="pane" id="pane-js"></section>
+    <section class="pane" id="pane-endpoints"></section>
+    <section class="pane" id="pane-params"></section>
+    <section class="pane" id="pane-content"></section>
+
+    <section class="pane" id="pane-log">
+      <div class="pane-bar">
+        <label class="check"><input id="autoscroll" type="checkbox" checked><span>Auto-scroll</span></label>
+        <div class="spacer"></div>
+        <button id="clearLog" class="btn btn-sm">Clear</button>
+        <button id="copyLog" class="btn btn-sm">Copy</button>
+      </div>
+      <pre id="logOut" class="log"></pre>
+    </section>
+
+    <section class="pane" id="pane-arsenal">
+      <div id="arsenalSummary" class="muted"></div>
+      <p class="muted note">Every tool is optional — SmartHunt falls back to built-in pure-Python
+         modules for anything missing. Install more for deeper coverage.</p>
+      <div id="arsenal"></div>
+    </section>
+  </main>
+</div>
+
+<footer class="statusbar">
+  <span id="status">Ready</span>
+  <span id="statusRight" class="muted"></span>
+</footer>
+
+<!-- authorization confirmation -->
+<div class="modal-backdrop" id="authModal" hidden>
+  <div class="modal">
+    <h3>Confirm authorization</h3>
+    <dl class="kv">
+      <dt>Target scope</dt><dd id="authScope"></dd>
+      <dt>Mode</dt><dd id="authMode"></dd>
+      <dt>Modules</dt><dd id="authModules"></dd>
+    </dl>
+    <p>This sends live traffic to the target. Only continue if you own this target or
+       have written authorization to test it — for example an in-scope bug bounty program.</p>
+    <label class="check"><input id="authCheck" type="checkbox"><span>I confirm I am authorized to test this target.</span></label>
+    <div class="modal-actions">
+      <button id="authCancel" class="btn">Cancel</button>
+      <button id="authConfirm" class="btn btn-start" disabled>Start scan</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
