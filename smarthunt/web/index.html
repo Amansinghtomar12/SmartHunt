@@ -113,8 +113,9 @@
     <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
 
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-tab="dashboard">Dashboard</button>
-      <button class="tab" data-tab="findings">Findings <span class="badge" id="b-findings">0</span></button>
+      <button class="tab active" data-tab="report">Report</button>
+      <button class="tab" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="findings">All findings <span class="badge" id="b-findings">0</span></button>
       <button class="tab" data-tab="secrets">Secrets <span class="badge" id="b-secrets">0</span></button>
       <button class="tab" data-tab="hosts">Hosts <span class="badge" id="b-hosts">0</span></button>
       <button class="tab" data-tab="subdomains">Subdomains <span class="badge" id="b-subdomains">0</span></button>
@@ -122,12 +123,20 @@
       <button class="tab" data-tab="js">JS <span class="badge" id="b-js">0</span></button>
       <button class="tab" data-tab="endpoints">Endpoints <span class="badge" id="b-endpoints">0</span></button>
       <button class="tab" data-tab="params">Params <span class="badge" id="b-params">0</span></button>
+      <button class="tab" data-tab="apis">Live APIs <span class="badge" id="b-apis">0</span></button>
       <button class="tab" data-tab="content">Content <span class="badge" id="b-content">0</span></button>
       <button class="tab" data-tab="log">Log</button>
       <button class="tab" data-tab="arsenal">Arsenal</button>
     </nav>
 
-    <section class="pane active" id="pane-dashboard">
+    <section class="pane active" id="pane-report">
+      <div id="reportOut" class="report">
+        <div class="empty">Run a scan — the single strongest reportable finding lands here,
+          with raw request/response evidence and steps to reproduce.</div>
+      </div>
+    </section>
+
+    <section class="pane" id="pane-dashboard">
       <h3>Scan summary</h3>
       <div id="cards" class="cards"></div>
       <div class="split">
@@ -152,6 +161,7 @@
     <section class="pane" id="pane-js"></section>
     <section class="pane" id="pane-endpoints"></section>
     <section class="pane" id="pane-params"></section>
+    <section class="pane" id="pane-apis"></section>
     <section class="pane" id="pane-content"></section>
 
     <section class="pane" id="pane-log">

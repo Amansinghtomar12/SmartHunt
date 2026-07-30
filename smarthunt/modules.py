@@ -15,7 +15,7 @@ import ssl
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
 try:
     import requests
@@ -63,7 +63,14 @@ class HostResult:
 
 @dataclass
 class Finding:
-    """A potential issue worth a human's attention."""
+    """A potential issue worth a human's attention.
+
+    The fields below ``source`` are what separates a scanner hit from something
+    a triager can act on: which OWASP category it belongs to, the exact request
+    that proved it, and what boundary it crossed.  Checks that cannot fill them
+    leave them empty, and :mod:`smarthunt.triage` will refuse to report the
+    finding rather than dress it up.
+    """
 
     host: str
     name: str
@@ -71,9 +78,32 @@ class Finding:
     detail: str = ""
     source: str = ""
 
+    # --- reportability -----------------------------------------------------
+    owasp: str = ""            # e.g. "A01:2021 Broken Access Control"
+    endpoint: str = ""         # full URL the issue lives at
+    method: str = ""           # HTTP method that triggered it
+    param: str = ""            # parameter or body field, when relevant
+    boundary: str = ""         # the security boundary that was crossed
+    expected: str = ""         # what a correctly-behaving server would do
+    actual: str = ""           # what this server actually did
+    impact: str = ""           # demonstrated impact, in proven language only
+    remediation: list = field(default_factory=list)
+    evidence: object = None    # smarthunt.evidence.Evidence, when captured
+    confidence: str = "low"    # low / medium / high — set by the checker
+
     def as_dict(self) -> dict:
-        return {"host": self.host, "name": self.name, "severity": self.severity,
+        data = {"host": self.host, "name": self.name, "severity": self.severity,
                 "detail": self.detail, "source": self.source}
+        for key in ("owasp", "endpoint", "method", "param", "boundary",
+                    "expected", "actual", "impact", "confidence"):
+            value = getattr(self, key)
+            if value:
+                data[key] = value
+        if self.remediation:
+            data["remediation"] = list(self.remediation)
+        if self.evidence is not None:
+            data["evidence"] = self.evidence.as_dict()
+        return data
 
 
 SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "unknown": 5}
@@ -152,13 +182,14 @@ def _bruteforce(domain, wordlist, inv, log, stop, threads):
     candidates = [f"{label}.{domain}" for label in labels]
     log("info", f"DNS bruteforce: {len(candidates)} candidates")
 
-    tool = inv.first("puredns", "shuffledns", "dnsx")
+    tool = inv.first("puredns", "shuffledns", "massdns", "dnsx")
     if tool:
         log("info", f"  using {tool}")
         payload = "\n".join(candidates)
         cmd = {
             "puredns": ["puredns", "resolve", "--quiet"],
             "shuffledns": ["shuffledns", "-silent", "-d", domain],
+            "massdns": ["massdns", "-r", "/etc/resolv.conf", "-t", "A", "-o", "S", "-q"],
             "dnsx": ["dnsx", "-silent", "-a"],
         }[tool]
         code, out, _ = run(cmd, timeout=300, input_text=payload)
@@ -191,21 +222,29 @@ def _bruteforce(domain, wordlist, inv, log, stop, threads):
 
 def _permute(domain, known, inv, log, stop, threads):
     """Generate and resolve permutations of already-known subdomains."""
-    tool = inv.first("gotator", "dnsgen", "altdns")
-    if not tool:
-        return set()
-    log("info", f"Permutation via {tool}")
+    # Each generator uses a different mutation strategy, so their outputs barely
+    # overlap — run every one that is installed and resolve the union.
     payload = "\n".join(sorted(known))
-    cmd = {
+    commands = {
         "gotator": ["gotator", "-sub", "-", "-perm", "-", "-depth", "1", "-silent"],
         "dnsgen": ["dnsgen", "-"],
         "altdns": ["altdns", "-i", "/dev/stdin", "-o", "/dev/stdout"],
-    }[tool]
-    code, out, _ = run(cmd, timeout=180, input_text=payload)
-    if code != 0 or not out:
+    }
+    generated: set[str] = set()
+    for tool, cmd in commands.items():
+        if stop.is_set() or not inv.has(tool):
+            continue
+        log("info", f"Permutation via {tool}")
+        code, out, _ = run(cmd, timeout=180, input_text=payload)
+        if code != 0 or not out:
+            continue
+        produced = {l.strip() for l in out.splitlines() if l.strip().endswith(domain)}
+        log("info", f"  {tool}: {len(produced)} permutations")
+        generated |= produced
+    if not generated:
         return set()
-    candidates = [l.strip() for l in out.splitlines() if l.strip().endswith(domain)][:20000]
-    log("info", f"  {tool}: {len(candidates)} permutations to resolve")
+    candidates = sorted(generated)[:20000]
+    log("info", f"  {len(candidates)} unique permutations to resolve")
 
     found = set()
 
@@ -291,6 +330,15 @@ def probe_http(hosts, inv, log, stop, session, threads=40):
     results: dict[str, HostResult] = {}
 
     # --- httpx (preferred) -------------------------------------------------
+    if inv.has("httprobe") and not inv.has("httpx") and hosts and not stop.is_set():
+        log("info", "HTTP probing via httprobe")
+        code, out, _ = run(["httprobe", "-c", "40"], timeout=300,
+                           input_text="\n".join(hosts))
+        if code in (0, 124) and out:
+            probed = [l.strip() for l in out.splitlines() if l.strip().startswith("http")]
+            log("info", f"  httprobe: {len(probed)} live URLs")
+            hosts = sorted({urlparse(u).netloc for u in probed}) or hosts
+
     if inv.has("httpx") and hosts:
         log("info", f"Probing {len(hosts)} hosts with httpx")
         code, out, _ = run(
@@ -364,7 +412,9 @@ def scan_ports(hosts, ports, inv, log, stop, threads=300):
     port_list = ports or list(wordlists.COMMON_PORTS.keys())
     open_ports: dict[str, list[int]] = {}
 
-    tool = inv.first("naabu", "nmap")
+    # Port scanners are interchangeable implementations of the same scan, so
+    # the best available one runs rather than all three repeating the work.
+    tool = inv.first("naabu", "masscan", "nmap")
     if tool and hosts:
         log("info", f"Port scanning {len(hosts)} hosts with {tool}")
         port_arg = ",".join(str(p) for p in port_list)
@@ -542,6 +592,34 @@ def _builtin_crawl(seeds, domain, log, stop, session, depth, max_pages):
 # --------------------------------------------------------------------------- #
 # Stage: parameter discovery
 # --------------------------------------------------------------------------- #
+def build_fuzz_urls(urls, inv, log, stop, marker="FUZZ") -> list[str]:
+    """Normalise parameterised URLs into one injection template per shape.
+
+    qsreplace collapses ``?id=1``, ``?id=2``, ``?id=99`` into a single
+    ``?id=FUZZ`` template, so the OWASP stage tests each distinct parameter
+    shape once instead of hundreds of times with the same result.
+    """
+    param_urls = [u for u in urls if "?" in u and "=" in u]
+    if not param_urls:
+        return []
+    if inv.has("qsreplace") and not stop.is_set():
+        code, out, _ = run(["qsreplace", marker], timeout=120,
+                           input_text="\n".join(param_urls[:20000]))
+        if code == 0 and out:
+            shaped = sorted({l.strip() for l in out.splitlines() if l.strip()})
+            log("info", f"qsreplace: {len(param_urls)} URLs -> {len(shaped)} parameter shapes")
+            return shaped
+    # Built-in equivalent when qsreplace is not installed.
+    shaped = set()
+    for url in param_urls:
+        parts = urlparse(url)
+        keys = sorted(parse_qs(parts.query, keep_blank_values=True))
+        if keys:
+            shaped.add(urlunparse(parts._replace(
+                query="&".join(f"{k}={marker}" for k in keys), fragment="")))
+    return sorted(shaped)
+
+
 def discover_params(domain, urls, inv, log, stop):
     """Extract parameter names from collected URLs and external param tools."""
     params: dict[str, set[str]] = {}
@@ -556,6 +634,18 @@ def discover_params(domain, urls, inv, log, stop):
             interesting.add(url)
         for key, values in qs.items():
             params.setdefault(key, set()).update(v[:60] for v in values if v)
+
+    # unfurl pulls parameter keys straight out of the collected URL corpus,
+    # catching names that never appeared in a page we crawled.
+    if inv.has("unfurl") and urls and not stop.is_set():
+        log("info", "Running unfurl over the collected URLs")
+        code, out, _ = run(["unfurl", "--unique", "keys"], timeout=120,
+                           input_text="\n".join(list(urls)[:20000]))
+        if code == 0 and out:
+            new_keys = {l.strip() for l in out.splitlines() if l.strip()}
+            log("info", f"  unfurl: {len(new_keys)} parameter names")
+            for key in new_keys:
+                params.setdefault(key, set())
 
     for tool in ("paramspider", "arjun"):
         if stop.is_set() or not inv.has(tool):
@@ -647,31 +737,36 @@ def discover_content(results, paths, inv, log, stop, session, threads=25, wordli
     hits: list[dict] = []
     path_list = paths or wordlists.CONTENT_PATHS
 
-    tool = inv.first("ffuf", "feroxbuster", "dirsearch")
-    if tool and wordlist_path and results and not stop.is_set():
+    installed_fuzzers = [t for t in ("ffuf", "feroxbuster", "dirsearch", "kiterunner")
+                         if inv.has(t)]
+    for tool in installed_fuzzers:
+        if stop.is_set() or not (wordlist_path and results):
+            break
         log("info", f"Content discovery via {tool}")
         for res in list(results.values())[:20]:
             if stop.is_set():
                 break
             base = res.url.rstrip("/")
-            if tool == "ffuf":
-                cmd = ["ffuf", "-s", "-w", wordlist_path, "-u", f"{base}/FUZZ",
-                       "-mc", "200,201,204,301,302,401,403", "-t", "40"]
-            elif tool == "feroxbuster":
-                cmd = ["feroxbuster", "-u", base, "-w", wordlist_path, "-q", "--no-state"]
-            else:
-                cmd = ["dirsearch", "-u", base, "-w", wordlist_path, "-q"]
+            cmd = {
+                "ffuf": ["ffuf", "-s", "-w", wordlist_path, "-u", f"{base}/FUZZ",
+                         "-mc", "200,201,204,301,302,401,403", "-t", "40"],
+                "feroxbuster": ["feroxbuster", "-u", base, "-w", wordlist_path,
+                                "-q", "--no-state"],
+                "dirsearch": ["dirsearch", "-u", base, "-w", wordlist_path, "-q"],
+                "kiterunner": ["kr", "scan", base, "-w", wordlist_path, "-q"],
+            }[tool]
             code, out, _ = run(cmd, timeout=300)
             if code in (0, 124) and out:
                 for line in out.splitlines():
                     line = line.strip()
                     if line:
                         hits.append({"url": line if line.startswith("http") else f"{base}/{line}",
-                                     "status": 200, "length": 0, "type": ""})
-        if hits:
-            log("info", f"{tool}: {len(hits)} paths")
-            return hits
+                                     "status": 200, "length": 0, "type": "", "source": tool})
+        log("info", f"  {tool}: {len(hits)} paths so far")
 
+    # The built-in probe still runs after the external fuzzers. It carries real
+    # status codes and content types (which the parsed tool output does not) and
+    # covers the curated path list even when a tool used a different wordlist.
     if session is None:
         return hits
 
@@ -701,7 +796,16 @@ def discover_content(results, paths, inv, log, stop, session, threads=25, wordli
             if hit:
                 hits.append(hit)
                 log("found", f"path: {hit['url']} [{hit['status']}] ({hit['length']}b)")
-    return hits
+
+    # Several fuzzers plus the built-in probe all feed this list, so the same
+    # path can arrive more than once. Keep the richest entry per URL — the
+    # built-in one carries a real status code and content type.
+    best: dict[str, dict] = {}
+    for hit in hits:
+        current = best.get(hit["url"])
+        if current is None or (not current.get("type") and hit.get("type")):
+            best[hit["url"]] = hit
+    return list(best.values())
 
 
 # --------------------------------------------------------------------------- #
@@ -743,20 +847,24 @@ def check_takeover(resolved, results, inv, log, stop, session):
     """Detect dangling CNAMEs pointing at unclaimed third-party services."""
     findings: list[Finding] = []
 
-    if inv.first("subzy", "subjack") and resolved and not stop.is_set():
-        tool = inv.first("subzy", "subjack")
-        log("info", f"Subdomain takeover check via {tool}")
+    # subzy and subjack ship different fingerprint sets, so a service one of
+    # them knows about the other may miss. Run both when both are installed.
+    takeover_cmds = {
+        "subzy": ["subzy", "run", "--targets", "-", "--hide_fails"],
+        "subjack": ["subjack", "-w", "-", "-ssl"],
+    }
+    if resolved and not stop.is_set():
         hosts = "\n".join(resolved)
-        if tool == "subzy":
-            code, out, _ = run(["subzy", "run", "--targets", "-", "--hide_fails"],
-                               timeout=300, input_text=hosts)
-        else:
-            code, out, _ = run(["subjack", "-w", "-", "-ssl"], timeout=300, input_text=hosts)
-        if code in (0, 124) and out:
-            for line in out.splitlines():
-                if "VULNERABLE" in line.upper():
-                    findings.append(Finding(line.strip()[:80], "Subdomain takeover", "high",
-                                            line.strip(), source=tool))
+        for tool, cmd in takeover_cmds.items():
+            if stop.is_set() or not inv.has(tool):
+                continue
+            log("info", f"Subdomain takeover check via {tool}")
+            code, out, _ = run(cmd, timeout=300, input_text=hosts)
+            if code in (0, 124) and out:
+                for line in out.splitlines():
+                    if "VULNERABLE" in line.upper():
+                        findings.append(Finding(line.strip()[:80], "Subdomain takeover", "high",
+                                                line.strip(), source=tool))
 
     # Built-in CNAME fingerprinting (always runs)
     for host, (ips, cname) in resolved.items():
@@ -868,6 +976,28 @@ def check_vulns(results, content_hits, urls, inv, log, stop, session, nuclei_sev
                 if line.strip().startswith("http"):
                     findings.append(Finding(_host_of(line), "CRLF injection", "medium",
                                             line.strip(), source="crlfuzz"))
+
+    # --- corsy: CORS misconfiguration ---------------------------------------
+    if inv.has("corsy") and results and not stop.is_set():
+        log("info", "Running corsy")
+        targets = "\n".join(r.url for r in results.values() if r.url)
+        code, out, _ = run(["corsy", "-i", "-", "-q"], timeout=300, input_text=targets)
+        if code in (0, 124) and out:
+            for line in out.splitlines():
+                if "http" in line and any(k in line.lower() for k in ("vulnerable", "misconfig")):
+                    findings.append(Finding(_host_of(line), "CORS misconfiguration", "medium",
+                                            line.strip()[:300], source="corsy"))
+
+    # --- smuggler: request smuggling ----------------------------------------
+    if inv.has("smuggler") and results and not stop.is_set():
+        log("info", "Running smuggler")
+        for res in list(results.values())[:15]:
+            if stop.is_set():
+                break
+            code, out, _ = run(["smuggler", "-u", res.url], timeout=180)
+            if code in (0, 124) and out and "POTENTIALLY VULNERABLE" in out.upper():
+                findings.append(Finding(res.host, "HTTP request smuggling", "high",
+                                        out.strip()[:300], source="smuggler"))
 
     if session is None:
         return findings

@@ -24,9 +24,9 @@ import threading
 import time
 from dataclasses import dataclass, field, asdict
 
-from . import jsrecon, modules, wordlists
+from . import jsrecon, modules, owasp, triage, wordlists
 from .modules import Finding, HostResult, SEVERITY_RANK
-from .tools import ToolInventory, detect_tools
+from .tools import ToolInventory, detect_tools, run as tools_run
 
 MODE_DOMAIN = "domain"
 MODE_WILDCARD = "wildcard"
@@ -41,9 +41,11 @@ STAGES = [
     ("takeover", "Subdomain Takeover", (MODE_WILDCARD,)),
     ("urls", "URL / Endpoint Collection", (MODE_DOMAIN, MODE_WILDCARD)),
     ("js", "JavaScript Gathering & Analysis", (MODE_DOMAIN, MODE_WILDCARD)),
+    ("endpoints", "API Endpoint Verification", (MODE_DOMAIN, MODE_WILDCARD)),
     ("params", "Parameter Discovery", (MODE_DOMAIN, MODE_WILDCARD)),
     ("content", "Content Discovery", (MODE_DOMAIN, MODE_WILDCARD)),
     ("vulns", "Vulnerability Checks", (MODE_DOMAIN, MODE_WILDCARD)),
+    ("owasp", "OWASP Top 10 Testing", (MODE_DOMAIN, MODE_WILDCARD)),
     ("screenshot", "Screenshots", (MODE_DOMAIN, MODE_WILDCARD)),
 ]
 
@@ -51,9 +53,10 @@ STAGE_TITLES = {key: title for key, title, _ in STAGES}
 
 #: Stages enabled by default per mode.
 DEFAULT_ENABLED = {
-    MODE_DOMAIN: {"resolve", "http", "tech", "urls", "js", "params", "content", "vulns"},
+    MODE_DOMAIN: {"resolve", "http", "tech", "urls", "js", "endpoints", "params",
+                  "content", "vulns", "owasp"},
     MODE_WILDCARD: {"subdomains", "resolve", "http", "tech", "takeover", "urls",
-                    "js", "params", "content", "vulns"},
+                    "js", "endpoints", "params", "content", "vulns", "owasp"},
 }
 
 _DOMAIN_RE = re.compile(r"^(?:\*\.)?(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
@@ -105,6 +108,8 @@ class ScanConfig:
     nuclei_severity: str = "low,medium,high,critical"
     output_dir: str = ""
     authorized: bool = False             # explicit user confirmation
+    collaborator: str = ""               # host that observes SSRF callbacks
+    use_sqlmap: bool = True              # only on an already-confirmed injection
 
     def wordlist_lines(self, path: str) -> list[str]:
         if not path or not os.path.isfile(path):
@@ -133,7 +138,9 @@ class ScanResults:
     params: dict = field(default_factory=dict)
     secrets: list[dict] = field(default_factory=list)
     content: list[dict] = field(default_factory=list)
+    api_endpoints: list[dict] = field(default_factory=list)
     findings: list[dict] = field(default_factory=list)
+    report: dict = field(default_factory=dict)   # the single triaged finding
     tools_used: list[str] = field(default_factory=list)
 
     @property
@@ -149,6 +156,7 @@ class ScanResults:
             "URLs": len(self.urls),
             "JS files": len(self.js_files),
             "Endpoints": len(self.js_endpoints),
+            "Live APIs": sum(1 for e in self.api_endpoints if e.get("api")),
             "Parameters": len(self.params.get("names", [])),
             "Secrets": len(self.secrets),
             "Findings": len(self.findings),
@@ -207,6 +215,31 @@ class Scanner:
 
     def _enabled(self, key):
         return key in self.config.enabled_stages
+
+    def _confirm_with_sqlmap(self, owasp_findings, findings):
+        """Run sqlmap only where injection is already proven.
+
+        sqlmap is intrusive and slow, so pointing it at every parameter is both
+        rude to the target and wasteful. Running it solely against a parameter
+        whose database error we already captured turns a proven injection into
+        a confirmed one, with the backend named.
+        """
+        cfg = self.config
+        candidates = [f for f in owasp_findings if "sql injection" in f.name.lower()]
+        if not (candidates and cfg.use_sqlmap and self.inv.has("sqlmap")):
+            return
+        for finding in candidates[:3]:
+            if self.stop_event.is_set():
+                break
+            self.log("info", f"Confirming with sqlmap: {finding.endpoint}")
+            code, out, _ = tools_run(
+                ["sqlmap", "-u", finding.endpoint, "--batch", "--level=1", "--risk=1",
+                 "--technique=B", "--answers=follow=N", "--disable-coloring"],
+                timeout=600)
+            if code in (0, 124) and out and "is vulnerable" in out.lower():
+                finding.detail += "  [confirmed by sqlmap]"
+                finding.confidence = "high"
+                self.log("found", f"  sqlmap confirmed injection on {finding.param}")
 
     # --- pipeline ---------------------------------------------------------
     def _run(self):
@@ -341,6 +374,21 @@ class Scanner:
                 res.urls = sorted(urls)
                 end("js")
 
+            # --- 8b. verify JS-derived endpoints against every live host ------
+            # Reading a bundle yields path strings; this is where they become
+            # real, callable endpoints. In wildcard mode each path is tried on
+            # every live subdomain, because staging frequently exposes an API
+            # that production does not.
+            if "endpoints" in planned and not self.stop_event.is_set():
+                begin("endpoints")
+                res.api_endpoints = jsrecon.verify_endpoints(
+                    res.js_endpoints, live, self.log, self.stop_event, self.session,
+                    threads=max(5, cfg.threads // 2))
+                for hit in res.api_endpoints:
+                    urls.add(hit["url"])
+                res.urls = sorted(urls)
+                end("endpoints")
+
             # --- 9. parameter discovery ---------------------------------------
             if "params" in planned and not self.stop_event.is_set():
                 begin("params")
@@ -366,6 +414,21 @@ class Scanner:
                     self.session, nuclei_severity=cfg.nuclei_severity)
                 end("vulns")
 
+            # --- 11b. OWASP Top 10 ------------------------------------------------
+            if "owasp" in planned and not self.stop_event.is_set():
+                begin("owasp")
+                fuzz_urls = modules.build_fuzz_urls(urls, self.inv, self.log,
+                                                    self.stop_event, marker="1")
+                owasp_findings = owasp.run_checks(
+                    live, fuzz_urls or sorted(urls),
+                    [e["url"] for e in res.api_endpoints],
+                    res.js_files, self.log, self.stop_event, self.session,
+                    threads=max(5, cfg.threads // 4),
+                    collaborator=cfg.collaborator)
+                findings += owasp_findings
+                self._confirm_with_sqlmap(owasp_findings, findings)
+                end("owasp")
+
             # --- 12. screenshots -------------------------------------------------
             if "screenshot" in planned and not self.stop_event.is_set():
                 begin("screenshot")
@@ -376,6 +439,31 @@ class Scanner:
 
             res.hosts = [hr.as_dict() for hr in sorted(live.values(), key=lambda h: h.host)]
             findings.sort(key=lambda f: SEVERITY_RANK.get(f.severity, 5))
+
+            # Triage always runs: the point of the scan is one reportable bug,
+            # not a list. It re-verifies its pick and captures fresh evidence,
+            # so it needs the live session before the scan tears down.
+            if not self.stop_event.is_set():
+                report = triage.build_report(findings, self.session, self.log,
+                                             target=cfg.target)
+                res.report = {
+                    "kind": report["kind"],
+                    "markdown": triage.render_markdown(report),
+                    "considered": report.get("considered", 0),
+                    "dropped": report.get("dropped", 0),
+                }
+                if report["kind"] == "report":
+                    res.report.update({
+                        "severity": report["severity"],
+                        "justification": report["justification"],
+                        "finding": report["finding"].as_dict(),
+                    })
+                elif report["kind"] == "evidence_needed":
+                    res.report.update({
+                        "missing": report["missing"],
+                        "finding": report["finding"].as_dict(),
+                    })
+
             res.findings = [f.as_dict() for f in findings]
 
         except Exception as exc:  # pragma: no cover - surfaced in the GUI

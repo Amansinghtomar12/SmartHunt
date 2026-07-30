@@ -86,6 +86,93 @@ python -m smarthunt                           # GUI via the package
 
 ---
 
+## One reportable bug, not a wall of noise
+
+Most scanners hand you 30 findings and let you work out which one a triager will
+accept. SmartHunt does that part for you: every scan ends in a **triage stage**
+that applies an evidence gate to the whole finding set and produces exactly one
+of three outputs.
+
+![Triaged report](docs/report.png)
+
+| Outcome | When | What you get |
+|---|---|---|
+| **Report** | Every evidence field is filled and the behaviour reproduces | One finding, severity graded from proven impact, raw request/response, numbered `curl` steps, remediation |
+| **Evidence needed** | Something looks real but a proof is missing | The exact tests still owed — never a half-written report |
+| **Nothing reportable** | No candidate clears the gate | "No reportable vulnerability found with the current evidence." |
+
+Two rules do the heavy lifting:
+
+**A large class of scanner output is never a standalone report.** Missing
+headers, version banners, `x-powered-by`, exposed Swagger, wildcard CORS,
+directory listings, SSRF candidates without a collaborator callback, endpoint
+discovery — all filtered out, each with the reason logged so you can see the
+call being made.
+
+**Severity comes from what was proven, not from the bug class.** Error-based SQL
+injection proves injection, not data exfiltration, so it is graded High rather
+than Critical, and the report says exactly why. Findings are re-verified at
+report time — reproduced twice, retried on a fresh cookie-free session — and
+credentials are masked (`DB_PASSWORD=REDACTED_SECRET`) before anything is written.
+
+The full finding list is still exported to JSON and CSV for your own digging.
+It just isn't the headline.
+
+## OWASP Top 10 coverage
+
+A dedicated stage tests the discovered attack surface across all ten 2021
+categories. Every check is **non-destructive** — bounded GET-style probes, no
+payload that writes, deletes or degrades the target.
+
+| | Category | What is actually tested |
+|---|---|---|
+| A01 | Broken Access Control | Path traversal, open redirect |
+| A02 | Cryptographic Failures | Secrets in JS bundles, transport checks |
+| A03 | Injection | SQL injection (5 engines), reflected XSS, SSTI, CRLF |
+| A04 | Insecure Design | Rate-limit and workflow probes |
+| A05 | Security Misconfiguration | Credentialed CORS reflection, risky methods, exposed `.env` / `.git` / actuator |
+| A06 | Vulnerable Components | Version banners matched against known-outdated releases |
+| A07 | Auth Failures | JWT exposure, session attributes |
+| A08 | Integrity Failures | Third-party scripts without Subresource Integrity |
+| A09 | Logging Failures | Stack traces and verbose errors leaking internals |
+| A10 | SSRF | URL-taking parameters; pass `--collaborator` to prove the callback |
+
+Two categories are honest about their limits: **SSRF** cannot be proven without
+a collaborator host you control, and **A09** is not externally observable. Both
+are recorded as candidates rather than dressed up as findings.
+
+```bash
+python smarthunt.py --cli example.com --collaborator abc123.oast.fun
+```
+
+## Wildcard goes deep on every subdomain
+
+Finding subdomains is the easy half. In wildcard mode SmartHunt runs the *whole*
+domain-mode pipeline against everything it found alive — pulling each host's
+JavaScript, mining it for endpoints, then **verifying those endpoints host by
+host**.
+
+That last step matters. Reading a bundle gives you path strings; `/api/v2/billing`
+is a guess until something answers it. SmartHunt joins every mined path onto
+every live host and probes it, because staging subdomains routinely expose an API
+that production does not. What comes back — with status, content type and allowed
+methods — is the real, callable attack surface, and it feeds straight into the
+OWASP stage.
+
+## Every tool, not the first one that matches
+
+Where tools find *different* things, SmartHunt runs them all and merges: all
+seven subdomain sources, all three permutation generators, both takeover
+scanners, every JS analyser (jsluice, LinkFinder, SecretFinder, xnLinkFinder,
+mantra, trufflehog, gitleaks), every content fuzzer.
+
+Where tools are interchangeable implementations of the same scan — port
+scanners, DNS resolvers — the best available one runs, because three tools
+repeating one scan is just three times the traffic. `sqlmap` is the exception
+that proves the rule: it only runs against a parameter whose database error has
+already been captured, turning a proven injection into a confirmed one instead
+of hammering every parameter on the site.
+
 ## Hybrid engine
 
 Every stage prefers a real external tool when one is on your `PATH`, and falls

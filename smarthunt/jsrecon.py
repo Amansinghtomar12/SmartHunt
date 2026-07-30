@@ -109,18 +109,28 @@ def collect_js_urls(hosts_or_urls, inv: ToolInventory, log, stop: threading.Even
     js_urls: set[str] = set()
     targets = list(hosts_or_urls)
 
-    # --- external: subjs / getJS ------------------------------------------
-    tool = inv.first("subjs", "getJS")
-    if tool and targets and not stop.is_set():
-        log("info", f"JS discovery via {tool}")
-        if tool == "subjs":
+    # --- external: every installed collector, merged ------------------------
+    # subjs and getJS find different files (one reads the response body, the
+    # other follows the page), so running both is not redundant.
+    if targets and not stop.is_set():
+        if inv.has("subjs"):
+            log("info", "JS discovery via subjs")
             code, out, _ = run(["subjs"], timeout=180, input_text="\n".join(targets))
-        else:
-            code, out, _ = run(["getJS", "--complete", "--url", targets[0]], timeout=120)
-        if code == 0:
-            new = {l.strip() for l in out.splitlines() if l.strip().startswith("http")}
-            log("info", f"  {tool}: {len(new)} JS files")
-            js_urls |= new
+            if code == 0:
+                new = {l.strip() for l in out.splitlines() if l.strip().startswith("http")}
+                log("info", f"  subjs: {len(new)} JS files")
+                js_urls |= new
+        if inv.has("getJS"):
+            log("info", "JS discovery via getJS")
+            for target in targets[:25]:
+                if stop.is_set():
+                    break
+                url = target if target.startswith("http") else f"https://{target}"
+                code, out, _ = run(["getJS", "--complete", "--url", url], timeout=90)
+                if code == 0:
+                    js_urls |= {l.strip() for l in out.splitlines()
+                                if l.strip().startswith("http")}
+            log("info", f"  getJS: {len(js_urls)} JS files so far")
 
     # --- built-in: parse each page for <script src> ------------------------
     if session is not None and not stop.is_set():
@@ -224,7 +234,7 @@ def analyze_js(js_urls, inv: ToolInventory, log, stop: threading.Event, session,
 
     # --- external enrichment: jsluice / mantra / trufflehog ----------------
     if downloaded and not stop.is_set():
-        _run_external_js_tools(downloaded, inv, endpoints, secrets, log)
+        _run_external_js_tools(downloaded, inv, endpoints, secrets, log, stop)
 
     # Keep endpoints that look useful and, when possible, in scope
     cleaned = _filter_endpoints(endpoints, base_domain)
@@ -240,9 +250,11 @@ def analyze_js(js_urls, inv: ToolInventory, log, stop: threading.Event, session,
     }
 
 
-def _run_external_js_tools(downloaded, inv, endpoints, secrets, log):
+def _run_external_js_tools(downloaded, inv, endpoints, secrets, log, stop_flag=None):
     """Feed downloaded JS through jsluice / mantra / trufflehog when installed."""
-    if not (inv.has("jsluice") or inv.has("mantra") or inv.has("trufflehog")):
+    analysers = ("jsluice", "mantra", "trufflehog", "linkfinder", "secretfinder",
+                 "xnLinkFinder", "gitleaks")
+    if not any(inv.has(t) for t in analysers):
         return
     tmpdir = tempfile.mkdtemp(prefix="smarthunt-js-")
     paths = []
@@ -279,6 +291,72 @@ def _run_external_js_tools(downloaded, inv, endpoints, secrets, log):
                     })
                 except Exception:
                     continue
+
+    # LinkFinder and xnLinkFinder pull endpoints regex-first; SecretFinder and
+    # mantra hunt credentials. Each finds things the others miss, so run all
+    # that are installed rather than stopping at the first.
+    if inv.has("linkfinder") and paths:
+        log("info", "Running LinkFinder over downloaded JS")
+        for path, url in paths[:120]:
+            if stop_flag and stop_flag.is_set():
+                break
+            code, out, _ = run(["linkfinder", "-i", path, "-o", "cli"], timeout=60)
+            if code == 0:
+                for line in out.splitlines():
+                    hit = line.strip()
+                    if hit and not hit.startswith("["):
+                        endpoints.add(hit)
+
+    if inv.has("xnLinkFinder") and paths:
+        log("info", "Running xnLinkFinder over downloaded JS")
+        code, out, _ = run(["xnLinkFinder", "-i", tmpdir, "-o", "cli"], timeout=240)
+        if code == 0:
+            for line in out.splitlines():
+                hit = line.strip()
+                if hit and not hit.startswith("["):
+                    endpoints.add(hit)
+
+    if inv.has("secretfinder") and paths:
+        log("info", "Running SecretFinder over downloaded JS")
+        for path, url in paths[:120]:
+            if stop_flag and stop_flag.is_set():
+                break
+            code, out, _ = run(["secretfinder", "-i", path, "-o", "cli"], timeout=60)
+            if code == 0:
+                for line in out.splitlines():
+                    if "->" in line:
+                        kind, _, value = line.partition("->")
+                        secrets.append({
+                            "type": f"secretfinder:{kind.strip()[:40]}",
+                            "severity": "high", "value": value.strip()[:80],
+                            "source": url})
+
+    if inv.has("mantra") and paths:
+        log("info", "Running mantra over downloaded JS")
+        code, out, _ = run(["mantra"], timeout=180,
+                           input_text="\n".join(u for _, u in paths))
+        if code == 0:
+            for line in out.splitlines():
+                if line.strip().startswith("[+]"):
+                    secrets.append({"type": "mantra:secret", "severity": "high",
+                                    "value": line.strip()[:80], "source": ""})
+
+    if inv.has("gitleaks") and paths:
+        log("info", "Running gitleaks over downloaded JS")
+        code, out, _ = run(["gitleaks", "detect", "--source", tmpdir, "--no-git",
+                            "--report-format", "json", "--report-path", "/dev/stdout"],
+                           timeout=180)
+        if out:
+            import json as _json
+            try:
+                for item in _json.loads(out):
+                    secrets.append({
+                        "type": f"gitleaks:{item.get('RuleID', '?')}",
+                        "severity": "high",
+                        "value": str(item.get("Secret", ""))[:80],
+                        "source": item.get("File", "")})
+            except Exception:
+                pass
 
     if inv.has("trufflehog"):
         log("info", "Running trufflehog over downloaded JS")
@@ -332,3 +410,105 @@ def _dedupe_secrets(secrets):
     severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     out.sort(key=lambda s: severity_rank.get(s["severity"], 5))
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Step 3 — turn mined paths into confirmed, live API endpoints
+# --------------------------------------------------------------------------- #
+def verify_endpoints(endpoints, live, log, stop: threading.Event, session,
+                     threads: int = 20, max_checks: int = 1500) -> list[dict]:
+    """Probe every JS-derived path against every live host and keep what answers.
+
+    Reading a bundle gives you *strings* — ``/api/v2/billing/invoices`` is a
+    guess until something answers it.  In wildcard mode the same path often
+    exists on some subdomains and not others (staging exposes what production
+    hides), so each path is tried against each host rather than against the
+    apex alone.  What comes back is the real, callable attack surface.
+    """
+    if session is None or not endpoints or not live:
+        return []
+
+    paths, absolute = set(), set()
+    for endpoint in endpoints:
+        if endpoint.startswith("http"):
+            absolute.add(endpoint)
+        elif endpoint.startswith("/") and len(endpoint) > 1:
+            paths.add(endpoint.split("#")[0])
+
+    bases = [hr.url or f"https://{hr.host}" for hr in live.values() if (hr.url or hr.host)]
+    candidates = list(absolute)
+    for base in bases:
+        for path in paths:
+            candidates.append(urljoin(base.rstrip("/") + "/", path.lstrip("/")))
+
+    # Deduplicate while preserving a stable order, then bound the work.
+    seen, ordered = set(), []
+    for url in candidates:
+        if url not in seen:
+            seen.add(url)
+            ordered.append(url)
+    if len(ordered) > max_checks:
+        log("warn", f"Endpoint verification capped at {max_checks} of {len(ordered)} candidates")
+        ordered = ordered[:max_checks]
+
+    log("info", f"Verifying {len(ordered)} candidate endpoints across {len(bases)} host(s)")
+
+    def probe(url):
+        if stop.is_set():
+            return None
+        try:
+            resp = session.get(url, timeout=10, verify=False, allow_redirects=False)
+        except Exception:
+            return None
+        if resp.status_code in (404, 400) or resp.status_code >= 500:
+            return None
+        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip()
+        body = resp.text or ""
+        structured = ctype in ("application/json", "application/xml", "text/xml",
+                               "application/graphql", "application/hal+json")
+        looks_api = structured or "/api" in urlparse(url).path.lower() or \
+            body.strip()[:1] in ("{", "[")
+        return {
+            "url": url,
+            "status": resp.status_code,
+            "type": ctype,
+            "length": len(resp.content or b""),
+            "api": bool(looks_api),
+            "host": urlparse(url).netloc,
+            "methods": "",
+        }
+
+    confirmed = []
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        for result in pool.map(probe, ordered):
+            if stop.is_set():
+                break
+            if result:
+                confirmed.append(result)
+
+    # For the API-shaped hits, ask which methods are allowed — that is what
+    # turns "this path exists" into "this path accepts writes".
+    api_hits = [c for c in confirmed if c["api"]][:120]
+
+    def methods_of(hit):
+        if stop.is_set():
+            return
+        try:
+            resp = session.options(hit["url"], timeout=8, verify=False)
+            allow = resp.headers.get("Allow") or resp.headers.get("Access-Control-Allow-Methods") or ""
+            hit["methods"] = allow.strip()
+        except Exception:
+            pass
+
+    if api_hits:
+        with ThreadPoolExecutor(max_workers=min(threads, 10)) as pool:
+            list(pool.map(methods_of, api_hits))
+
+    confirmed.sort(key=lambda c: (not c["api"], c["url"]))
+    log("info", f"✓ {len(confirmed)} endpoints answered "
+                f"({sum(1 for c in confirmed if c['api'])} look like real APIs)")
+    for hit in confirmed[:15]:
+        if hit["api"]:
+            extra = f"  [{hit['methods']}]" if hit["methods"] else ""
+            log("found", f"  API {hit['status']} {hit['url']}{extra}")
+    return confirmed
