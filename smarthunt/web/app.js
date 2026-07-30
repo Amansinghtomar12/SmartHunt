@@ -11,7 +11,7 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STAGE_ICONS = { pending: '○', running: '◐', done: '●', skipped: '◌' };
 const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
 const CARD_LABELS = ['Subdomains', 'Live hosts', 'URLs', 'JS files', 'Endpoints',
-                     'Parameters', 'Secrets', 'Findings', 'Critical/High'];
+                     'Live APIs', 'Parameters', 'Secrets', 'Findings', 'Critical/High'];
 
 const state = {
   mode: 'domain',
@@ -159,11 +159,11 @@ function renderPipeline(stageStates = {}) {
 }
 
 /* ── tabs ────────────────────────────────────────────────── */
-const TAB_NAMES = ['dashboard', 'findings', 'secrets', 'hosts', 'subdomains', 'urls',
-                   'js', 'endpoints', 'params', 'content', 'log', 'arsenal'];
+const TAB_NAMES = ['report', 'dashboard', 'findings', 'secrets', 'hosts', 'subdomains',
+                   'urls', 'js', 'endpoints', 'params', 'apis', 'content', 'log', 'arsenal'];
 
 function selectTab(name, { updateHash = true } = {}) {
-  if (!TAB_NAMES.includes(name)) name = 'dashboard';
+  if (!TAB_NAMES.includes(name)) name = 'report';
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   $$('.pane').forEach((p) => p.classList.toggle('active', p.id === `pane-${name}`));
   if (updateHash && location.hash.slice(1) !== name) {
@@ -276,6 +276,65 @@ function renderList(paneId, items) {
   });
 }
 
+/* ── report ──────────────────────────────────────────────── */
+/* A deliberately small Markdown subset — headings, bold, lists, inline code
+   and fenced blocks — is all the triage output uses, so no library is needed. */
+function renderMarkdown(md) {
+  const blocks = String(md || '').split(/```/);
+  return blocks.map((block, i) => {
+    if (i % 2 === 1) {                       // inside a fence
+      const body = block.replace(/^\w*\n/, '');
+      return `<pre class="md-code">${esc(body.trimEnd())}</pre>`;
+    }
+    return block.split('\n').map((line) => {
+      const t = line.trim();
+      if (!t) return '';
+      if (t === '---') return '<hr>';
+      if (t.startsWith('### ')) return `<h4>${inline(t.slice(4))}</h4>`;
+      if (t.startsWith('## ')) return `<h3>${inline(t.slice(3))}</h3>`;
+      if (t.startsWith('# ')) return `<h2>${inline(t.slice(2))}</h2>`;
+      if (/^\d+\.\s/.test(t)) return `<div class="md-step">${inline(t)}</div>`;
+      if (t.startsWith('- ')) return `<div class="md-li">${inline(t.slice(2))}</div>`;
+      return `<p>${inline(t)}</p>`;
+    }).join('');
+  }).join('');
+
+  function inline(text) {
+    return esc(text)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+  }
+}
+
+function renderReport(report) {
+  const host = $('#reportOut');
+  if (!report || !report.kind) {
+    host.innerHTML = '<div class="empty">No report yet.</div>';
+    return;
+  }
+  const badge = {
+    report: `<span class="pill ${esc(report.severity || 'low')}">${esc((report.severity || '').toUpperCase())}</span>
+             <span class="report-kind ok">REPORTABLE</span>`,
+    evidence_needed: '<span class="report-kind warn">EVIDENCE NEEDED</span>',
+    none: '<span class="report-kind dim">NOTHING REPORTABLE</span>',
+  }[report.kind] || '';
+
+  host.innerHTML = `
+    <div class="report-head">
+      ${badge}
+      <div class="spacer"></div>
+      <span class="muted">${esc(report.considered || 0)} findings considered ·
+        ${esc(report.dropped || 0)} not standalone-reportable</span>
+      <button class="btn btn-sm" data-role="copy-report">Copy Markdown</button>
+    </div>
+    <article class="md">${renderMarkdown(report.markdown)}</article>`;
+
+  host.querySelector('[data-role=copy-report]').addEventListener('click', () => {
+    copyText(report.markdown || '');
+    setStatus('Report copied as Markdown');
+  });
+}
+
 /* ── results ─────────────────────────────────────────────── */
 const sevPill = (v) => `<span class="pill ${esc(String(v).toLowerCase())}">${esc(String(v).toUpperCase())}</span>`;
 const linkCell = (v) => (String(v).startsWith('http')
@@ -318,6 +377,14 @@ function renderResults(res) {
     (res.content || []).map((c) => [c.url, c.status, c.length, c.type]),
     { cell: { 0: linkCell } });
 
+  renderTable('apis',
+    ['Endpoint', 'Status', 'Type', 'Methods', 'Length'],
+    (res.api_endpoints || []).filter((e) => e.api)
+      .map((e) => [e.url, e.status, e.type, e.methods || '', e.length]),
+    { cell: { 0: linkCell } });
+
+  renderReport(res.report);
+
   renderList('subdomains', res.subdomains || []);
   renderList('urls', res.urls || []);
   renderList('js', res.js_files || []);
@@ -334,6 +401,7 @@ function renderResults(res) {
     endpoints: (res.js_endpoints || []).length,
     params: ((res.params && res.params.names) || []).length,
     content: (res.content || []).length,
+    apis: (res.api_endpoints || []).filter((e) => e.api).length,
   };
   Object.entries(badges).forEach(([k, v]) => {
     const el = $(`#b-${k}`);
@@ -417,7 +485,7 @@ async function poll() {
           setStatus(`Done in ${res.duration}s — ${stats.Findings || 0} findings ` +
                     `(${stats['Critical/High'] || 0} critical/high), ` +
                     `${stats['Live hosts'] || 0} live hosts`);
-          selectTab('findings');
+          selectTab('report');
         }
       }
     } catch (err) {
@@ -554,7 +622,7 @@ async function init() {
   setMode('domain');
   setStatus(`Ready — SmartHunt v${meta.version}`);
 
-  ['findings', 'secrets', 'hosts', 'content'].forEach((p) => renderTable(p, [], []));
+  ['findings', 'secrets', 'hosts', 'content', 'apis'].forEach((p) => renderTable(p, [], []));
   ['subdomains', 'urls', 'js', 'endpoints', 'params'].forEach((p) => renderList(p, []));
 
   const initial = tabFromHash();

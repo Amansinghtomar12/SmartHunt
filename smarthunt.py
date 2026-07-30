@@ -87,6 +87,7 @@ def run_cli(args):
         subdomain_wordlist=args.sub_wordlist or "", content_wordlist=args.content_wordlist or "",
         ports=[int(p) for p in args.ports.split(",") if p.strip().isdigit()] if args.ports else [],
         output_dir=args.out, authorized=True,
+        collaborator=args.collaborator, use_sqlmap=not args.no_sqlmap,
     )
 
     def log(level, message):
@@ -113,16 +114,30 @@ def run_cli(args):
     for key, value in results.stats().items():
         print(f"  {key:<16} {value}")
 
+    # The headline is one triaged, reportable finding — not a finding dump.
+    # The full list still ships in the exported JSON/CSV for your own digging.
+    triaged = results.report or {}
+    kind = triaged.get("kind")
+    if kind == "report":
+        sev = triaged.get("severity", "")
+        color = {"critical": C["red"] + C["bold"], "high": C["red"],
+                 "medium": C["yellow"], "low": C["cyan"]}.get(sev, C["dim"])
+        print(f"\n{C['bold']}Reportable finding{C['reset']}  "
+              f"{color}[{sev}]{C['reset']}")
+        print(f"{C['dim']}{'─' * 68}{C['reset']}")
+        print(triaged.get("markdown", ""))
+    elif kind == "evidence_needed":
+        print(f"\n{C['bold']}{C['yellow']}Not yet reportable{C['reset']}")
+        print(f"{C['dim']}{'─' * 68}{C['reset']}")
+        print(triaged.get("markdown", ""))
+    else:
+        print(f"\n{C['dim']}No reportable vulnerability found with the current "
+              f"evidence.{C['reset']}")
+
     if results.findings:
-        print(f"\n{C['bold']}Findings{C['reset']}")
-        for f in results.findings[:40]:
-            sev = f["severity"]
-            color = {"critical": C["red"] + C["bold"], "high": C["red"],
-                     "medium": C["yellow"], "low": C["cyan"]}.get(sev, C["dim"])
-            print(f"  {color}[{sev:>8}]{C['reset']} {f['host']:<32} {f['name']} "
-                  f"{C['dim']}{str(f['detail'])[:70]}{C['reset']}")
-        if len(results.findings) > 40:
-            print(f"  {C['dim']}… and {len(results.findings) - 40} more (see the report){C['reset']}")
+        crit = sum(1 for f in results.findings if f["severity"] in ("critical", "high"))
+        print(f"\n{C['dim']}({len(results.findings)} raw findings in total, {crit} "
+              f"critical/high — full list in the exported JSON and CSV.){C['reset']}")
 
     outdir = os.path.join(args.out, apex.replace(".", "_"))
     written = report.export_all(results, outdir)
@@ -157,6 +172,11 @@ def main():
     parser.add_argument("--no-brute", action="store_true", help="skip DNS bruteforce")
     parser.add_argument("--sub-wordlist", help="subdomain wordlist file")
     parser.add_argument("--content-wordlist", help="content-discovery wordlist file")
+    parser.add_argument("--collaborator", default="",
+                        help="host that observes SSRF callbacks, e.g. your "
+                             "Burp Collaborator or interactsh domain")
+    parser.add_argument("--no-sqlmap", action="store_true",
+                        help="skip sqlmap confirmation on proven injection points")
     parser.add_argument("--out", default="smarthunt-results", help="output directory")
     parser.add_argument("-y", "--yes", action="store_true",
                         help="skip the authorization prompt (you still assert authorization)")
