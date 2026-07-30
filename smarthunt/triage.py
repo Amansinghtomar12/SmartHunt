@@ -246,6 +246,10 @@ def locked_severity(finding) -> tuple[str, str]:
     name = finding.name.lower()
     ev = finding.evidence
 
+    if "broken access control" in name or "idor" in name:
+        return "high", ("Attacker A received Victim B's private object while an "
+                        "unauthenticated request for the same URL was refused; "
+                        "cross-account read is demonstrated, not inferred.")
     if "sql injection" in name:
         return "high", ("Injection into the SQL parser is proven by the database error; "
                         "data extraction was not attempted, so this is not graded Critical.")
@@ -273,9 +277,13 @@ def locked_severity(finding) -> tuple[str, str]:
 #: a defensible way to choose what to report. Classes are ranked by how much an
 #: attacker gains from the *proven* behaviour, not by CVSS folklore.
 CLASS_PRIORITY = [
-    (re.compile(r"sql injection", re.I), 0),           # code execution in the DB
-    (re.compile(r"template injection", re.I), 1),      # code execution in the renderer
-    (re.compile(r"path traversal|arbitrary file read", re.I), 2),   # arbitrary read
+    # Proven cross-account data access ranks first: the attacker demonstrably
+    # *received the victim's data*. Error-based SQL injection proves the parser
+    # is reachable, which is serious but a weaker demonstration of impact.
+    (re.compile(r"broken access control|idor", re.I), 0),
+    (re.compile(r"sql injection", re.I), 1),           # code execution in the DB
+    (re.compile(r"template injection", re.I), 2),      # code execution in the renderer
+    (re.compile(r"path traversal|arbitrary file read", re.I), 3),   # arbitrary read
     (re.compile(r"exposed \.env|exposed \.git|secret in js|actuator", re.I), 3),  # credentials
     (re.compile(r"takeover", re.I), 4),
     (re.compile(r"cors", re.I), 5),
@@ -364,6 +372,17 @@ def build_report(findings, session, log, target: str = "") -> dict:
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
+def _auth_line(finding, ev) -> str:
+    """State the authentication context the finding was proven under."""
+    if "access control" in finding.name.lower() or "idor" in finding.name.lower():
+        return ("- **Authentication required:** Yes — proven with two accounts the "
+                "tester controls (Attacker A and Victim B); the unauthenticated "
+                "request for the same URL was refused")
+    if ev and ev.unauthenticated:
+        return "- **Authentication required:** No — reproduced unauthenticated"
+    return "- **Authentication required:** Not established"
+
+
 def render_markdown(report: dict) -> str:
     """Render the triage result in the format a bug bounty triager expects."""
     if report["kind"] == "none":
@@ -413,8 +432,7 @@ def render_markdown(report: dict) -> str:
         f"- **Method:** `{finding.method or 'GET'}`",
         f"- **Parameter / field:** `{finding.param or '—'}`",
         f"- **Host:** `{host}`",
-        f"- **Authentication required:** No — reproduced unauthenticated"
-        if (ev and ev.unauthenticated) else "- **Authentication required:** Not established",
+        _auth_line(finding, ev),
         "\n## Steps to Reproduce\n",
         "\n".join(steps) if steps else "_No captured exchanges._",
         "\n## Proof of Concept\n",

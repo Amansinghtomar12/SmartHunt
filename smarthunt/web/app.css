@@ -514,3 +514,17 @@ td a { color: var(--accent-2); }
   .logo, .stage-state.running, .log::after { animation: none; }
   body::after { display: none; }
 }
+
+/* ── session / account inputs ─────────────────────────────── */
+.acct-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--accent); margin: 12px 0 6px; text-shadow: var(--glow);
+}
+.acct-title::before { content: "» "; color: var(--dim); text-shadow: none; }
+.panel textarea {
+  width: 100%; padding: 7px 9px; border-radius: 6px; resize: vertical;
+  border: 1px solid var(--line); background: var(--bg-deep); color: var(--accent);
+  font: 11.5px/1.5 var(--mono); outline: none; margin-bottom: 6px;
+}
+.panel textarea:focus { border-color: var(--accent); box-shadow: var(--glow); }
+.panel textarea::placeholder { color: var(--dim); }

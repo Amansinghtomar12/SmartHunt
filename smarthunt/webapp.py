@@ -454,6 +454,14 @@ class Handler(BaseHTTPRequestHandler):
             exhaustive=bool(body.get("exhaustive", False)),
             max_rounds=as_int("rounds", 4, 1, 10),
             collaborator=str(body.get("collaborator") or ""),
+            auth_headers=str(body.get("auth_headers") or ""),
+            auth_cookies=str(body.get("auth_cookies") or ""),
+            auth_bearer=str(body.get("auth_bearer") or ""),
+            auth_check_url=str(body.get("auth_check_url") or ""),
+            auth_check_marker=str(body.get("auth_check_marker") or ""),
+            victim_headers=str(body.get("victim_headers") or ""),
+            victim_cookies=str(body.get("victim_cookies") or ""),
+            victim_bearer=str(body.get("victim_bearer") or ""),
         )
         try:
             SESSION.start(config)

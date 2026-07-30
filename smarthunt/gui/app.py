@@ -200,6 +200,54 @@ class SmartHuntApp(tk.Tk):
         dark_check(opts, "EXHAUSTIVE — loop until nothing new is found",
                    self.exhaustive_var).pack(anchor="w", fill="x")
 
+        # --- Session (authenticated testing) ---------------------------------
+        sess = ttk.Labelframe(side, text=" Session — authenticated testing ",
+                              padding=10)
+        sess.pack(fill="x", pady=(0, 10))
+        ttk.Label(sess, wraplength=300, style="Muted.TLabel",
+                  text=("Paste a session you already have: a Cookie value, a bearer "
+                        "token, or a raw header block from Burp/devtools. A second "
+                        "account you also control enables IDOR proof.")
+                  ).pack(anchor="w", pady=(0, 6))
+
+        self.auth_cookie_var = tk.StringVar()
+        self.auth_bearer_var = tk.StringVar()
+        self.auth_check_url_var = tk.StringVar()
+        self.auth_check_text_var = tk.StringVar()
+        self.victim_cookie_var = tk.StringVar()
+        self.victim_bearer_var = tk.StringVar()
+
+        def labelled(parent_frame, text, var, width=26):
+            row = ttk.Frame(parent_frame)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=text, width=13, style="Muted.TLabel").pack(side="left")
+            ttk.Entry(row, textvariable=var, width=width).pack(side="left", fill="x",
+                                                              expand=True)
+
+        ttk.Label(sess, text="ACCOUNT A — used for all testing",
+                  style="Head.TLabel").pack(anchor="w", pady=(4, 2))
+        labelled(sess, "Cookie", self.auth_cookie_var)
+        labelled(sess, "Bearer token", self.auth_bearer_var)
+        ttk.Label(sess, text="or paste a header block:", style="Muted.TLabel").pack(anchor="w")
+        self.auth_headers_text = tk.Text(
+            sess, height=3, bg=theme.BG_DEEP, fg=theme.ACCENT, relief="flat",
+            font=theme.FONT_MONO, insertbackground=theme.ACCENT,
+            highlightthickness=1, highlightbackground=theme.LINE)
+        self.auth_headers_text.pack(fill="x", pady=(2, 6))
+
+        ttk.Label(sess, text="SESSION CHECK — proves it is live",
+                  style="Head.TLabel").pack(anchor="w", pady=(4, 2))
+        labelled(sess, "URL", self.auth_check_url_var)
+        labelled(sess, "Text when in", self.auth_check_text_var)
+
+        ttk.Label(sess, text="ACCOUNT B — optional, enables IDOR",
+                  style="Head.TLabel").pack(anchor="w", pady=(6, 2))
+        labelled(sess, "Cookie", self.victim_cookie_var)
+        labelled(sess, "Bearer token", self.victim_bearer_var)
+        ttk.Label(sess, wraplength=300, style="Muted.TLabel",
+                  text=("Both accounts must be yours. SmartHunt only reads objects "
+                        "Account B has confirmed it owns.")).pack(anchor="w", pady=(4, 0))
+
         # --- Wordlists ------------------------------------------------------
         wl = ttk.Labelframe(side, text=" Wordlists (optional) ", padding=10)
         wl.pack(fill="x", pady=(0, 8))
@@ -595,6 +643,13 @@ class SmartHuntApp(tk.Tk):
             include_subdomains=self.subs_in_urls_var.get(),
             bruteforce_subdomains=self.bruteforce_var.get(),
             exhaustive=self.exhaustive_var.get(),
+            auth_cookies=self.auth_cookie_var.get().strip(),
+            auth_bearer=self.auth_bearer_var.get().strip(),
+            auth_headers=self.auth_headers_text.get("1.0", "end").strip(),
+            auth_check_url=self.auth_check_url_var.get().strip(),
+            auth_check_marker=self.auth_check_text_var.get().strip(),
+            victim_cookies=self.victim_cookie_var.get().strip(),
+            victim_bearer=self.victim_bearer_var.get().strip(),
             crawl_depth=self.depth_var.get(), max_pages=self.pages_var.get(),
             max_js_files=self.jsfiles_var.get(), ports=ports,
             subdomain_wordlist=self.sub_wordlist_var.get().strip(),

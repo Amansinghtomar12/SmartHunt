@@ -120,6 +120,59 @@ credentials are masked (`DB_PASSWORD=REDACTED_SECRET`) before anything is writte
 The full finding list is still exported to JSON and CSV for your own digging.
 It just isn't the headline.
 
+## Authenticated testing — and the bug class other scanners cannot reach
+
+Unauthenticated scanning only ever sees the front door. Hand SmartHunt a session
+you already have and every stage — crawling, JS collection, content discovery,
+the OWASP checks — runs logged in.
+
+```bash
+python smarthunt.py --cli target.com \
+  --auth-cookie "session=abc123; csrftoken=xyz" \
+  --auth-check-url https://target.com/account --auth-check-text "your-username"
+```
+
+Sessions can be given as a `Cookie` value, a bearer token, or a **raw header
+block pasted straight from Burp or devtools** — hop-by-hop headers are stripped
+and `Cookie:` is split into the jar automatically.
+
+**The session is verified before the scan leans on it.** A stale cookie does not
+fail loudly: the app just serves the login page with HTTP 200, and every finding
+afterwards is quietly about that login page. Give a check URL and a string that
+only appears when logged in, and SmartHunt says so once, up front.
+
+### Two accounts → proven IDOR
+
+Supply a **second account you also control** and SmartHunt tests OWASP A01,
+Broken Access Control — the most common serious bug class, and one no
+single-session scanner can prove:
+
+```bash
+python smarthunt.py --cli target.com \
+  --auth-cookie   "session=ATTACKER_A" \
+  --victim-cookie "session=VICTIM_B" \
+  --auth-check-url https://target.com/account --auth-check-text "attacker-name"
+```
+
+Every candidate endpoint gets three requests under three identities:
+
+1. **Victim B** requests their own object and is served it — so the object exists, is private, and B owns it.
+2. An **unauthenticated** client requests the same URL and is refused — so it is not simply public, by far the most common false positive.
+3. **Attacker A**, a different logged-in account, requests it and is served B's data anyway.
+
+All three must hold. If the anonymous request succeeds, the resource is public
+and nothing is reported. If Attacker A gets 401/403/404, or gets their own data
+rather than B's, nothing is reported. SmartHunt also re-requests with a
+different object ID: if the response is identical, the endpoint ignores the
+identifier and is returning a generic page, not B's record.
+
+Verified against a deliberately broken local target with three endpoints — a
+genuine IDOR, a correctly-protected one, and a public one. It reports the first
+and stays silent on the other two.
+
+**Both accounts must be yours.** SmartHunt only ever reads objects Account B has
+itself confirmed it owns, and every request is a read.
+
 ## OWASP Top 10 coverage
 
 A dedicated stage tests the discovered attack surface across all ten 2021
@@ -128,7 +181,7 @@ payload that writes, deletes or degrades the target.
 
 | | Category | What is actually tested |
 |---|---|---|
-| A01 | Broken Access Control | Path traversal, open redirect |
+| A01 | Broken Access Control | Path traversal, open redirect, **IDOR with two sessions** |
 | A02 | Cryptographic Failures | Secrets in JS bundles, transport checks |
 | A03 | Injection | SQL injection (5 engines), reflected XSS, SSTI, CRLF |
 | A04 | Insecure Design | Rate-limit and workflow probes |

@@ -89,6 +89,11 @@ def run_cli(args):
         output_dir=args.out, authorized=True,
         collaborator=args.collaborator, use_sqlmap=not args.no_sqlmap,
         exhaustive=args.exhaustive, max_rounds=args.rounds,
+        auth_headers=_maybe_file(args.auth_headers),
+        auth_cookies=args.auth_cookie, auth_bearer=args.auth_bearer,
+        auth_check_url=args.auth_check_url, auth_check_marker=args.auth_check_text,
+        victim_headers=_maybe_file(args.victim_headers),
+        victim_cookies=args.victim_cookie, victim_bearer=args.victim_bearer,
     )
 
     def log(level, message):
@@ -147,6 +152,14 @@ def run_cli(args):
         print(f"  {C['dim']}{path}{C['reset']}")
 
 
+def _maybe_file(value: str) -> str:
+    """Accept either a path to a header block or the block pasted inline."""
+    if value and os.path.isfile(value):
+        with open(value, "r", encoding="utf-8", errors="ignore") as fh:
+            return fh.read()
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="smarthunt", description="SmartHunt — GUI bug-hunting recon suite",
@@ -173,6 +186,28 @@ def main():
     parser.add_argument("--no-brute", action="store_true", help="skip DNS bruteforce")
     parser.add_argument("--sub-wordlist", help="subdomain wordlist file")
     parser.add_argument("--content-wordlist", help="content-discovery wordlist file")
+    auth_group = parser.add_argument_group(
+        "authenticated testing",
+        "Supply a session you already have. Two sessions (yours and a second "
+        "account you also control) enable access-control/IDOR proof.")
+    auth_group.add_argument("--auth-headers", default="",
+                            help="file containing a raw header block for Account A "
+                                 "(paste from Burp or devtools), or the block itself")
+    auth_group.add_argument("--auth-cookie", default="",
+                            help="Cookie header value for Account A")
+    auth_group.add_argument("--auth-bearer", default="",
+                            help="bearer token for Account A")
+    auth_group.add_argument("--auth-check-url", default="",
+                            help="a URL that requires login, used to verify the session")
+    auth_group.add_argument("--auth-check-text", default="",
+                            help="text present only when logged in (e.g. your username)")
+    auth_group.add_argument("--victim-headers", default="",
+                            help="raw header block (or file) for Account B")
+    auth_group.add_argument("--victim-cookie", default="",
+                            help="Cookie header value for Account B")
+    auth_group.add_argument("--victim-bearer", default="",
+                            help="bearer token for Account B")
+
     parser.add_argument("--exhaustive", "-E", action="store_true",
                         help="leave nothing behind: raise every cap and loop "
                              "discovery until a round finds nothing new")

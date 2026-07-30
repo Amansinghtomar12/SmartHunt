@@ -84,14 +84,35 @@ class Exchange:
     def as_dict(self) -> dict:
         return asdict(self)
 
+    def _credential_label(self) -> str:
+        """Which account this exchange was sent as, for the placeholder.
+
+        Access-control findings interleave two accounts, so labelling every
+        cookie ATTACKER_SESSION would misrepresent which identity made which
+        request — the one thing a triager reads these three requests to learn.
+        """
+        note = (self.note or "").lower()
+        # Order matters: the attacker's note reads "Attacker A requests Victim
+        # B's object", so a victim-first test would mislabel it.
+        if note.startswith("attacker") or "attacker a requests" in note:
+            return "ATTACKER_SESSION"
+        if "victim" in note:
+            return "VICTIM_SESSION"
+        if "unauthenticated" in note or "anonymous" in note:
+            return ""
+        return "ATTACKER_SESSION"
+
     def raw_request(self, host: str = "") -> str:
         path = urlparse(self.url).path or "/"
         query = urlparse(self.url).query
         target = f"{path}?{query}" if query else path
         lines = [f"{self.method} {target} HTTP/1.1",
                  f"Host: {urlparse(self.url).netloc}"]
+        session_label = self._credential_label()
         for key, value in self.request_headers.items():
             placeholder = _SENSITIVE_HEADERS.get(key.lower())
+            if key.lower() == "cookie" and session_label:
+                placeholder = session_label
             lines.append(f"{key}: {placeholder or value}")
         body = f"\n\n{self.request_body}" if self.request_body else ""
         return mask_host(mask("\n".join(lines) + body), host)

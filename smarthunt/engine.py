@@ -24,7 +24,7 @@ import threading
 import time
 from dataclasses import dataclass, field, asdict
 
-from . import jsrecon, modules, owasp, triage, wordlists
+from . import accesscontrol, auth, jsrecon, modules, owasp, triage, wordlists
 from .modules import Finding, HostResult, SEVERITY_RANK
 from .tools import ToolInventory, detect_tools, run as tools_run
 
@@ -46,6 +46,8 @@ STAGES = [
     ("content", "Content Discovery", (MODE_DOMAIN, MODE_WILDCARD)),
     ("vulns", "Vulnerability Checks", (MODE_DOMAIN, MODE_WILDCARD)),
     ("owasp", "OWASP Top 10 Testing", (MODE_DOMAIN, MODE_WILDCARD)),
+    ("accesscontrol", "Access Control / IDOR (needs 2 sessions)",
+     (MODE_DOMAIN, MODE_WILDCARD)),
     ("screenshot", "Screenshots", (MODE_DOMAIN, MODE_WILDCARD)),
 ]
 
@@ -54,9 +56,10 @@ STAGE_TITLES = {key: title for key, title, _ in STAGES}
 #: Stages enabled by default per mode.
 DEFAULT_ENABLED = {
     MODE_DOMAIN: {"resolve", "http", "tech", "urls", "js", "endpoints", "params",
-                  "content", "vulns", "owasp"},
+                  "content", "vulns", "owasp", "accesscontrol"},
     MODE_WILDCARD: {"subdomains", "resolve", "http", "tech", "takeover", "urls",
-                    "js", "endpoints", "params", "content", "vulns", "owasp"},
+                    "js", "endpoints", "params", "content", "vulns", "owasp",
+                    "accesscontrol"},
 }
 
 _DOMAIN_RE = re.compile(r"^(?:\*\.)?(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
@@ -112,6 +115,15 @@ class ScanConfig:
     use_sqlmap: bool = True              # only on an already-confirmed injection
     exhaustive: bool = False             # loop discovery until nothing new appears
     max_rounds: int = 4                  # safety stop for the exhaustive loop
+    # --- authenticated testing (all optional) ---------------------------
+    auth_headers: str = ""               # pasted raw header block for Account A
+    auth_cookies: str = ""               # or just a Cookie: value
+    auth_bearer: str = ""                # or just a token
+    auth_check_url: str = ""             # a URL that requires being logged in
+    auth_check_marker: str = ""          # text present only when logged in
+    victim_headers: str = ""             # Account B — enables IDOR proof
+    victim_cookies: str = ""
+    victim_bearer: str = ""
 
     def wordlist_lines(self, path: str) -> list[str]:
         if not path or not os.path.isfile(path):
@@ -184,7 +196,23 @@ class Scanner:
         self._on_stage = on_stage or (lambda key, state: None)
         self._on_progress = on_progress or (lambda done, total: None)
         self._on_done = on_done or (lambda results, error: None)
-        self.session = modules.make_session()
+        # self.session is what every stage uses. When credentials are supplied
+        # it carries them, so crawling, JS collection, content discovery and the
+        # OWASP checks all run as a logged-in user rather than stopping at the
+        # login wall. anon_session stays clean for the "is this actually
+        # public?" comparison.
+        self.anon_session = modules.make_session()
+        self.attacker = auth.build_profile(
+            "attacker A", config.auth_headers, config.auth_cookies,
+            config.auth_bearer, config.auth_check_url, config.auth_check_marker)
+        self.victim = auth.build_profile(
+            "victim B", config.victim_headers, config.victim_cookies,
+            config.victim_bearer, config.auth_check_url, config.auth_check_marker)
+
+        self.session = (auth.make_authenticated_session(self.attacker, modules.make_session)
+                        if self.attacker.configured else self.anon_session)
+        self.victim_session = (auth.make_authenticated_session(self.victim, modules.make_session)
+                               if self.victim.configured else None)
         self._wildcard_ips = None   # cached across exhaustive rounds
 
     # --- control ----------------------------------------------------------
@@ -239,6 +267,24 @@ class Scanner:
         self.log("info", f"Exhaustive mode: crawl depth {cfg.crawl_depth}, "
                          f"{cfg.max_pages} pages, {cfg.max_js_files} JS files, "
                          f"up to {cfg.max_rounds} discovery rounds")
+
+    def _verify_sessions(self):
+        """Prove the supplied sessions are live before the scan relies on them.
+
+        A stale cookie does not announce itself: the app just serves the login
+        page with HTTP 200, and every finding afterwards is quietly about that
+        login page. Better to say so once, loudly, at the start.
+        """
+        for profile, session in ((self.attacker, self.session),
+                                 (self.victim, self.victim_session)):
+            if not profile.configured:
+                continue
+            ok, detail = auth.verify(profile, session, self.log)
+            level = "info" if ok else "warn"
+            self.log(level, f"Session [{profile.label}] {detail}")
+            if not ok and profile.check_url:
+                self.log("warn", "  results from this session may just be the "
+                                 "login page — re-copy the session and retry")
 
     def _recurse_hosts(self, cfg, res, hosts, urls, live) -> set:
         """Mine everything found so far for hostnames we have not seen yet.
@@ -327,6 +373,8 @@ class Scanner:
             self.log("info", f"Stages: {', '.join(STAGE_TITLES[k] for k in planned) or 'none'}")
             self.log("info", "=" * 68)
             res.tools_used = sorted(self.inv.available)
+            self.log("info", auth.summarise(self.attacker, self.victim))
+            self._verify_sessions()
             self._apply_exhaustive_limits()
 
             hosts: set[str] = {cfg.target}
@@ -497,6 +545,15 @@ class Scanner:
                 findings += owasp_findings
                 self._confirm_with_sqlmap(owasp_findings, findings)
                 end("owasp")
+
+            # --- 11c. access control (needs both sessions) -----------------------
+            if "accesscontrol" in planned and not self.stop_event.is_set():
+                begin("accesscontrol")
+                findings += accesscontrol.run_checks(
+                    urls, res.api_endpoints, self.session, self.victim_session,
+                    self.anon_session, self.log, self.stop_event,
+                    threads=max(2, cfg.threads // 8))
+                end("accesscontrol")
 
             # --- 12. screenshots -------------------------------------------------
             if "screenshot" in planned and not self.stop_event.is_set():

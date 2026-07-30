@@ -88,6 +88,33 @@
       </label>
       <label class="check"><input id="optBrute" type="checkbox" checked><span>DNS bruteforce subdomains</span></label>
       <label class="check"><input id="optSubs" type="checkbox" checked><span>Include subdomains in URL collection</span></label>
+      <label class="check"><input id="optExhaustive" type="checkbox"><span>EXHAUSTIVE — loop until nothing new</span></label>
+    </section>
+
+    <section class="panel">
+      <h2>Session <span class="muted-sm">(authenticated testing)</span></h2>
+      <div class="muted-sm" style="margin-bottom:8px">
+        Paste a session you already have — a Cookie value, a bearer token, or a
+        whole header block copied from Burp or devtools. Adding a
+        <strong>second account you also control</strong> enables access-control
+        (IDOR) proof.
+      </div>
+
+      <div class="acct-title">Account A <span class="muted-sm">— used for all testing</span></div>
+      <label class="field"><span>Cookie</span><input id="authCookie" type="text" placeholder="session=…; csrftoken=…"></label>
+      <label class="field"><span>Bearer token</span><input id="authBearer" type="text" placeholder="eyJhbGciOi…"></label>
+      <textarea id="authHeaders" rows="3" placeholder="…or paste a raw header block:&#10;Cookie: session=abc&#10;Authorization: Bearer xyz"></textarea>
+
+      <div class="acct-title">Session check <span class="muted-sm">— proves it is live</span></div>
+      <label class="field"><span>URL</span><input id="authCheckUrl" type="text" placeholder="https://target/account"></label>
+      <label class="field"><span>Text when in</span><input id="authCheckText" type="text" placeholder="your username"></label>
+
+      <div class="acct-title">Account B <span class="muted-sm">— optional, enables IDOR</span></div>
+      <label class="field"><span>Cookie</span><input id="victimCookie" type="text" placeholder="session=…"></label>
+      <label class="field"><span>Bearer token</span><input id="victimBearer" type="text" placeholder="eyJhbGciOi…"></label>
+      <textarea id="victimHeaders" rows="2" placeholder="…or a raw header block"></textarea>
+      <div class="muted-sm">Both accounts must be yours. SmartHunt only reads objects
+        Account B has confirmed it owns.</div>
     </section>
 
     <section class="panel">
