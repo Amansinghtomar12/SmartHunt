@@ -14,9 +14,8 @@ Desktop app, browser UI, and headless CLI, all over the same engine.
 
 ![SmartHunt running a scan](docs/demo.gif)
 
-<sub>A real scan, recorded live: boot sequence, stages turning green as they
-complete, counters climbing, then the triaged report. GitHub shows this as an
-animation — the static shots further down are the same interface held still.</sub>
+<sub>A real scan, recorded live: stages turning green as they complete, the
+elapsed clock advancing, counters climbing, then the triaged report.</sub>
 
 ---
 
@@ -63,7 +62,7 @@ Typing `*.example.com` switches to wildcard mode automatically.
 Every scan ends in a triage stage that applies an evidence gate to the whole
 finding set and produces exactly one of three outcomes.
 
-![The triaged report](docs/report.png)
+![The triaged report](docs/report.gif)
 
 | Outcome | When | What you get |
 |---|---|---|
@@ -253,7 +252,7 @@ because something attested to those.
 
 ## The arsenal — 112 tools, all driven
 
-![Arsenal panel](docs/arsenal.png)
+![Arsenal panel](docs/arsenal.gif)
 
 Where tools find *different* things, SmartHunt runs them all and merges: every
 subdomain source, all permutation generators, both takeover scanners, every JS
@@ -284,11 +283,10 @@ terminal skin with matrix rain, a boot sequence, count-up readouts, a spinner on
 the running stage and a glitch when a finding lands. All motion respects
 `prefers-reduced-motion`.
 
-![SmartHunt desktop app](docs/screenshot.png)
+![SmartHunt desktop app](docs/desktop.gif)
 
-The browser UI, held still:
-
-![SmartHunt browser UI](docs/web-ui.png)
+<sub>The desktop app running the same scan — the stage spinner, the counters
+easing up, and the report opening when it finishes.</sub>
 
 The browser UI runs on Python's stdlib `http.server`, so it needs no extra
 dependency. Because it lives on an origin every page in your browser can reach,
