@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """SmartHunt — GUI bug-hunting recon suite.
 
-    python smarthunt.py                      # launch the GUI
+    python smarthunt.py                      # launch the desktop GUI
     python smarthunt.py example.com          # GUI, target pre-filled
+    python smarthunt.py --web                # browser UI on http://127.0.0.1:8777
+    python smarthunt.py --web --port 9000 --open
     python smarthunt.py --cli example.com    # headless, same engine
     python smarthunt.py --cli '*.example.com' --out results/
     python smarthunt.py --tools               # list detected external tools
@@ -136,6 +138,13 @@ def main():
         epilog=__doc__.split("\n", 2)[2])
     parser.add_argument("target", nargs="?", help="example.com or '*.example.com'")
     parser.add_argument("--cli", action="store_true", help="run headless instead of the GUI")
+    parser.add_argument("--web", action="store_true",
+                        help="serve the browser UI instead of the desktop GUI")
+    parser.add_argument("--port", type=int, default=8777, help="port for --web (default 8777)")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="bind address for --web (default 127.0.0.1, loopback only)")
+    parser.add_argument("--open", action="store_true",
+                        help="open the browser automatically with --web")
     parser.add_argument("--wildcard", "-w", action="store_true", help="force wildcard mode")
     parser.add_argument("--tools", action="store_true", help="list external tool inventory and exit")
     parser.add_argument("--stages", help="comma-separated module keys to run")
@@ -156,6 +165,10 @@ def main():
 
     if args.tools:
         list_tools()
+        return
+    if args.web:
+        from smarthunt.webapp import serve
+        serve(host=args.host, port=args.port, open_browser=args.open)
         return
     if args.cli:
         if not args.target:

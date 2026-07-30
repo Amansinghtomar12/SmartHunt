@@ -28,12 +28,43 @@ Typing `*.example.com` into the box switches to wildcard mode automatically.
 git clone <this repo>
 cd SmartHunt
 pip install -r requirements.txt      # just `requests`
-python smarthunt.py                  # launch the GUI
+python smarthunt.py                  # launch the desktop GUI
 ```
 
 That's it. **No external tools are required** — SmartHunt ships pure-Python
 implementations of every stage. Installing the optional tools below makes it
 faster and deeper, but it produces real results out of the box.
+
+### Browser mode
+
+Prefer a browser, or hunting from a VPS over SSH? Run the same engine behind a
+local web UI:
+
+```bash
+python smarthunt.py --web            # then open http://127.0.0.1:8777
+python smarthunt.py --web --open     # …and launch your browser for you
+python smarthunt.py --web --port 9000
+```
+
+![SmartHunt web UI](docs/web-ui.png)
+
+The web UI is feature-identical to the desktop app — same two target modes, same
+modules, live log, sortable/filterable result tables and the same exports. It
+needs no extra dependency (it runs on Python's built-in `http.server`).
+
+Because it lives on an origin every page in your browser can reach, it defends
+itself on three fronts: `Host` must be a loopback name (blocking DNS rebinding),
+every mutating request must carry a per-process `X-SmartHunt-Token` stamped into
+the page, and a cross-origin `Origin` is rejected. Without that token check, any
+site you happened to be visiting could quietly start scans from your machine.
+
+If you're on a remote box, don't expose the port — forward it instead:
+
+```bash
+ssh -L 8777:127.0.0.1:8777 you@your-vps    # then browse http://127.0.0.1:8777
+```
+
+### Desktop mode
 
 If Tkinter is missing:
 
