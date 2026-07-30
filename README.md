@@ -12,7 +12,11 @@ request/response proof and `curl` reproduction steps.
 
 Desktop app, browser UI, and headless CLI, all over the same engine.
 
-![SmartHunt browser UI](docs/web-ui.png)
+![SmartHunt running a scan](docs/demo.gif)
+
+<sub>A real scan, recorded live: boot sequence, stages turning green as they
+complete, counters climbing, then the triaged report. GitHub shows this as an
+animation — the static shots further down are the same interface held still.</sub>
 
 ---
 
@@ -281,6 +285,10 @@ the running stage and a glitch when a finding lands. All motion respects
 `prefers-reduced-motion`.
 
 ![SmartHunt desktop app](docs/screenshot.png)
+
+The browser UI, held still:
+
+![SmartHunt browser UI](docs/web-ui.png)
 
 The browser UI runs on Python's stdlib `http.server`, so it needs no extra
 dependency. Because it lives on an origin every page in your browser can reach,
