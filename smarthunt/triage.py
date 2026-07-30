@@ -35,6 +35,9 @@ NEVER_REPORT = [
      "missing headers are best-practice findings, not vulnerabilities"),
     (re.compile(r"outdated component|version disclosure|server banner", re.I),
      "a version banner alone proves no exploitable condition"),
+    (re.compile(r"possible cve-|^cve-\d{4}", re.I),
+     "a CVE matched from a version banner is inference, not evidence — banners "
+     "lie and distributions backport fixes; verify the exploit path by hand"),
     (re.compile(r"directory listing|autoindex", re.I),
      "directory listing needs sensitive content to matter"),
     (re.compile(r"risky http methods", re.I),

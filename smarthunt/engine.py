@@ -24,7 +24,7 @@ import threading
 import time
 from dataclasses import dataclass, field, asdict
 
-from . import accesscontrol, auth, jsrecon, modules, owasp, triage, wordlists
+from . import accesscontrol, auth, cve, jsrecon, modules, owasp, triage, wordlists
 from .modules import Finding, HostResult, SEVERITY_RANK
 from .tools import ToolInventory, detect_tools, run as tools_run
 
@@ -46,6 +46,7 @@ STAGES = [
     ("content", "Content Discovery", (MODE_DOMAIN, MODE_WILDCARD)),
     ("vulns", "Vulnerability Checks", (MODE_DOMAIN, MODE_WILDCARD)),
     ("owasp", "OWASP Top 10 Testing", (MODE_DOMAIN, MODE_WILDCARD)),
+    ("cve", "Known CVE Matching", (MODE_DOMAIN, MODE_WILDCARD)),
     ("accesscontrol", "Access Control / IDOR (needs 2 sessions)",
      (MODE_DOMAIN, MODE_WILDCARD)),
     ("screenshot", "Screenshots", (MODE_DOMAIN, MODE_WILDCARD)),
@@ -56,10 +57,10 @@ STAGE_TITLES = {key: title for key, title, _ in STAGES}
 #: Stages enabled by default per mode.
 DEFAULT_ENABLED = {
     MODE_DOMAIN: {"resolve", "http", "tech", "urls", "js", "endpoints", "params",
-                  "content", "vulns", "owasp", "accesscontrol"},
+                  "content", "vulns", "owasp", "cve", "accesscontrol"},
     MODE_WILDCARD: {"subdomains", "resolve", "http", "tech", "takeover", "urls",
                     "js", "endpoints", "params", "content", "vulns", "owasp",
-                    "accesscontrol"},
+                    "cve", "accesscontrol"},
 }
 
 _DOMAIN_RE = re.compile(r"^(?:\*\.)?(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
@@ -112,6 +113,7 @@ class ScanConfig:
     output_dir: str = ""
     authorized: bool = False             # explicit user confirmation
     collaborator: str = ""               # host that observes SSRF callbacks
+    cve_online: bool = False             # also query OSV/NVD, slower and rate-limited
     use_sqlmap: bool = True              # only on an already-confirmed injection
     exhaustive: bool = False             # loop discovery until nothing new appears
     max_rounds: int = 4                  # safety stop for the exhaustive loop
@@ -545,6 +547,13 @@ class Scanner:
                 findings += owasp_findings
                 self._confirm_with_sqlmap(owasp_findings, findings)
                 end("owasp")
+
+            # --- 11b2. known CVE matching ----------------------------------------
+            if "cve" in planned and not self.stop_event.is_set():
+                begin("cve")
+                findings += cve.check(list(live.values()), res.js_files, self.log,
+                                      self.stop_event, online=cfg.cve_online)
+                end("cve")
 
             # --- 11c. access control (needs both sessions) -----------------------
             if "accesscontrol" in planned and not self.stop_event.is_set():

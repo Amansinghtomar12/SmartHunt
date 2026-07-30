@@ -61,6 +61,7 @@ class SmartHuntApp(tk.Tk):
 
         self._build_sidebar(body)
         self._build_tabs(body)
+        self.after(300, self._animate)
         self._build_statusbar()
 
     def _build_header(self):
@@ -69,7 +70,8 @@ class SmartHuntApp(tk.Tk):
 
         left = ttk.Frame(head)
         left.pack(side="left")
-        ttk.Label(left, text="⬢ SmartHunt", style="Title.TLabel").pack(side="left")
+        self.logo_label = ttk.Label(left, text="▚ SmartHunt", style="Title.TLabel")
+        self.logo_label.pack(side="left")
         ttk.Label(left, text="  bug-hunting recon suite", style="Muted.TLabel").pack(side="left", pady=(6, 0))
 
         right = ttk.Frame(head)
@@ -294,6 +296,47 @@ class SmartHuntApp(tk.Tk):
         ttk.Button(row, text="…", width=3, command=browse).pack(side="left")
 
     # --- tabs -------------------------------------------------------------
+    # --- animation ---------------------------------------------------------
+    SPINNER = ("◐", "◓", "◑", "◒")
+
+    def _animate(self):
+        """Drive the running-stage spinner and the scanning pulse.
+
+        Tk has no animation loop, so this reschedules itself on the event loop.
+        It only redraws while a scan is running, and stops touching widgets the
+        moment one is not, so an idle window costs nothing.
+        """
+        self._tick = getattr(self, "_tick", 0) + 1
+        if self.scanner and self.scanner.running:
+            glyph = self.SPINNER[self._tick % len(self.SPINNER)]
+            # Only the stage currently marked running spins; the others keep
+            # their pending/done glyph.
+            for key in getattr(self, "_running_stages", set()):
+                label = self.stage_labels.get(key)
+                if label is not None:
+                    label.config(text=glyph, foreground=theme.ACCENT)
+            self.logo_label.config(
+                foreground=theme.ACCENT if self._tick % 2 else theme.MUTED)
+        elif getattr(self, "_was_running", False):
+            self.logo_label.config(foreground=theme.ACCENT)
+        self._was_running = bool(self.scanner and self.scanner.running)
+        self.after(180, self._animate)
+
+    def _count_up(self, card, target, step=0):
+        """Ease a stat tile up to its value instead of snapping to it."""
+        try:
+            value = int(target)
+        except (TypeError, ValueError):
+            card.set(target)
+            return
+        frames = 12
+        if step > frames or value == 0:
+            card.set(value)
+            return
+        # ease-out cubic: quick, then settling — reads as counting up
+        card.set(int(value * (1 - (1 - step / frames) ** 3)))
+        self.after(28, lambda: self._count_up(card, value, step + 1))
+
     def _render_report(self, results):
         """Show the triaged finding, mirroring the browser UI's Report pane."""
         report = getattr(results, "report", None) or {}
@@ -719,6 +762,11 @@ class SmartHuntApp(tk.Tk):
     def _set_stage_state(self, key, state):
         icon = STAGE_ICONS.get(state, "○")
         color = STAGE_COLORS.get(state, theme.MUTED)
+        # The animation loop spins whatever is in here and leaves the rest alone.
+        running = getattr(self, "_running_stages", None)
+        if running is None:
+            running = self._running_stages = set()
+        running.add(key) if state == "running" else running.discard(key)
         if key in self.stage_labels:
             self.stage_labels[key].config(text=icon, foreground=color)
         if key in self.pipeline_labels:
@@ -758,7 +806,7 @@ class SmartHuntApp(tk.Tk):
 
         stats = results.stats()
         for label, card in self.cards.items():
-            card.set(stats.get(label, 0))
+            self._count_up(card, stats.get(label, 0))
 
         counts = {}
         for finding in results.findings:

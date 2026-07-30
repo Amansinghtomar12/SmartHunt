@@ -88,6 +88,7 @@ def run_cli(args):
         ports=[int(p) for p in args.ports.split(",") if p.strip().isdigit()] if args.ports else [],
         output_dir=args.out, authorized=True,
         collaborator=args.collaborator, use_sqlmap=not args.no_sqlmap,
+        cve_online=args.cve_online,
         exhaustive=args.exhaustive, max_rounds=args.rounds,
         auth_headers=_maybe_file(args.auth_headers),
         auth_cookies=args.auth_cookie, auth_bearer=args.auth_bearer,
@@ -213,6 +214,8 @@ def main():
                              "discovery until a round finds nothing new")
     parser.add_argument("--rounds", type=int, default=4,
                         help="max discovery rounds for --exhaustive (default 4)")
+    parser.add_argument("--cve-online", action="store_true",
+                        help="also query OSV/NVD for CVEs (slower, rate-limited)")
     parser.add_argument("--collaborator", default="",
                         help="host that observes SSRF callbacks, e.g. your "
                              "Burp Collaborator or interactsh domain")

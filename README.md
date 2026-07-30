@@ -173,6 +173,25 @@ and stays silent on the other two.
 **Both accounts must be yours.** SmartHunt only ever reads objects Account B has
 itself confirmed it owns, and every request is a read.
 
+## Known-CVE matching
+
+A dedicated stage matches every fingerprinted banner and library version against
+a curated table of high-signal, remotely-checkable CVEs — Apache path traversal,
+Ghostcat, Spring4Shell, ProxyShell, Drupalgeddon, jQuery XSS and prototype
+pollution, and more. `--cve-online` additionally queries OSV and NVD.
+
+**These are never reported as findings.** A version banner is not proof of
+anything: banners lie, distributions backport fixes without bumping the string,
+and the vulnerable code path may not even be reachable. So every match is
+labelled inference, carries low confidence, has an empty impact field, and is
+refused by the triage gate. What it gives you instead is a precise next step —
+each entry carries the safe check that confirms or kills it by hand:
+
+```
+[critical] target.com: CVE-2021-41773 — Apache path traversal (2.4.49)
+           NOT verified — GET /cgi-bin/.%2e/%2e%2e/etc/passwd confirms it
+```
+
 ## OWASP Top 10 coverage
 
 A dedicated stage tests the discovered attack surface across all ten 2021
