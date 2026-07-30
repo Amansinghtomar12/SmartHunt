@@ -1,6 +1,7 @@
 # SmartHunt
 
-A GUI bug-hunting recon suite. Point it at a domain, press **START**, and it runs a
+A bug-hunting recon suite with a desktop GUI and a browser UI — same engine,
+same terminal skin, same features. Point it at a domain, press **START**, and it runs a
 full reconnaissance pipeline — subdomain enumeration, HTTP probing, JavaScript
 gathering, endpoint and parameter discovery, secret hunting, content discovery and
 vulnerability checks — then hands you sortable results and an exportable report.

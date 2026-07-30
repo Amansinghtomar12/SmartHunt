@@ -20,7 +20,7 @@ def dark_check(master, text, variable, command=None, **kw):
         master, text=text, variable=variable, command=command,
         bg=theme.BG, fg=theme.FG, selectcolor=theme.ACCENT,
         activebackground=theme.BG, activeforeground=theme.ACCENT,
-        disabledforeground="#475569", font=theme.FONT,
+        disabledforeground=theme.DIM, font=theme.FONT,
         highlightthickness=0, bd=0, anchor="w", padx=2, **kw)
 
 
@@ -30,7 +30,7 @@ def dark_radio(master, text, variable, value, command=None, **kw):
         master, text=text, variable=variable, value=value, command=command,
         bg=theme.BG, fg=theme.FG, selectcolor=theme.ACCENT,
         activebackground=theme.BG, activeforeground=theme.ACCENT,
-        disabledforeground="#475569", font=theme.FONT,
+        disabledforeground=theme.DIM, font=theme.FONT,
         highlightthickness=0, bd=0, anchor="w", padx=2, **kw)
 
 
@@ -42,7 +42,7 @@ class ModeSelector(tk.Frame):
     app, so each option is drawn as a full card that highlights when active.
     """
 
-    SELECTED_BG = "#0c4a6e"
+    SELECTED_BG = theme.ACCENT_DEEP
 
     def __init__(self, master, variable, options, command=None, **kw):
         super().__init__(master, bg=theme.BG, **kw)
@@ -93,8 +93,8 @@ class ModeSelector(tk.Frame):
                                     highlightthickness=2 if on else 1, bg=bg)
             parts["glyph"].configure(text="◉" if on else "○", bg=bg,
                                      fg=theme.ACCENT if on else theme.MUTED)
-            parts["title"].configure(bg=bg, fg="#ffffff" if on else theme.MUTED)
-            parts["sub"].configure(bg=bg, fg="#bae6fd" if on else "#64748b")
+            parts["title"].configure(bg=bg, fg=theme.ACCENT if on else theme.MUTED)
+            parts["sub"].configure(bg=bg, fg=theme.MUTED if on else theme.DIM)
             for frame in parts["frames"]:
                 frame.configure(bg=bg)
 
@@ -278,7 +278,7 @@ class ListPane(ttk.Frame):
         wrap.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self.text = tk.Text(wrap, bg=theme.PANEL, fg=theme.FG, font=theme.FONT_MONO,
                             insertbackground=theme.FG, relief="flat", wrap="none",
-                            selectbackground="#0369a1", padx=8, pady=6)
+                            selectbackground=theme.ACCENT_DEEP, padx=8, pady=6)
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.text.yview)
         hsb = ttk.Scrollbar(wrap, orient="horizontal", command=self.text.xview)
         self.text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set, state="disabled")
@@ -334,9 +334,9 @@ class LogPane(ttk.Frame):
 
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-        self.text = tk.Text(wrap, bg="#0b1220", fg=theme.FG, font=theme.FONT_MONO,
+        self.text = tk.Text(wrap, bg=theme.BG_DEEP, fg=theme.FG, font=theme.FONT_MONO,
                             relief="flat", wrap="word", padx=8, pady=6,
-                            insertbackground=theme.FG, selectbackground="#0369a1")
+                            insertbackground=theme.FG, selectbackground=theme.ACCENT_DEEP)
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.text.yview)
         self.text.configure(yscrollcommand=vsb.set, state="disabled")
         self.text.pack(side="left", fill="both", expand=True)

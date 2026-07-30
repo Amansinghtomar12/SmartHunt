@@ -130,7 +130,7 @@ class SmartHuntApp(tk.Tk):
         self.stop_btn = ttk.Button(controls, text="■  STOP", style="Stop.TButton",
                                    command=self._stop_scan, state="disabled")
         self.stop_btn.pack(side="left", expand=True, fill="x", padx=(0, 4))
-        self.pause_btn = ttk.Button(controls, text="⏸", width=4,
+        self.pause_btn = ttk.Button(controls, text="PAUSE", width=7,
                                     command=self._toggle_pause, state="disabled")
         self.pause_btn.pack(side="left")
 
@@ -168,6 +168,7 @@ class SmartHuntApp(tk.Tk):
         self.pages_var = tk.IntVar(value=300)
         self.jsfiles_var = tk.IntVar(value=400)
         self.bruteforce_var = tk.BooleanVar(value=True)
+        self.exhaustive_var = tk.BooleanVar(value=False)
         self.subs_in_urls_var = tk.BooleanVar(value=True)
         self.severity_var = tk.StringVar(value="low,medium,high,critical")
         self.ports_var = tk.StringVar(value="")
@@ -196,6 +197,8 @@ class SmartHuntApp(tk.Tk):
                    self.bruteforce_var).pack(anchor="w", fill="x", pady=(5, 0))
         dark_check(opts, "Include subdomains in URL collection",
                    self.subs_in_urls_var).pack(anchor="w", fill="x")
+        dark_check(opts, "EXHAUSTIVE — loop until nothing new is found",
+                   self.exhaustive_var).pack(anchor="w", fill="x")
 
         # --- Wordlists ------------------------------------------------------
         wl = ttk.Labelframe(side, text=" Wordlists (optional) ", padding=10)
@@ -243,6 +246,55 @@ class SmartHuntApp(tk.Tk):
         ttk.Button(row, text="…", width=3, command=browse).pack(side="left")
 
     # --- tabs -------------------------------------------------------------
+    def _render_report(self, results):
+        """Show the triaged finding, mirroring the browser UI's Report pane."""
+        report = getattr(results, "report", None) or {}
+        kind = report.get("kind")
+        self._report_markdown = report.get("markdown", "")
+
+        label = {
+            "report": f"[!] REPORTABLE  severity={report.get('severity', '?').upper()}",
+            "evidence_needed": "[~] EVIDENCE NEEDED — not yet reportable",
+            "none": "[ ] No reportable vulnerability found with the current evidence",
+        }.get(kind, "[ ] No report")
+        considered = report.get("considered", 0)
+        dropped = report.get("dropped", 0)
+        if considered:
+            label += f"   ({considered} findings considered, {dropped} not standalone)"
+        self.report_status.set(label)
+
+        self.report_text.configure(state="normal")
+        self.report_text.delete("1.0", "end")
+        if not self._report_markdown:
+            self.report_text.insert("1.0", "No reportable vulnerability found "
+                                           "with the current evidence.\n")
+        else:
+            for line in self._report_markdown.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("# "):
+                    self.report_text.insert("end", stripped[2:] + "\n", "h1")
+                elif stripped.startswith("## "):
+                    self.report_text.insert("end", "\n" + stripped[3:] + "\n", "h2")
+                elif stripped.startswith("```"):
+                    continue
+                elif stripped.startswith(("curl ", "GET ", "POST ", "HTTP/")):
+                    self.report_text.insert("end", line + "\n", "code")
+                elif stripped.startswith("**Severity:**"):
+                    self.report_text.insert("end", stripped.replace("**", "") + "\n", "crit")
+                else:
+                    self.report_text.insert("end", line.replace("**", "") + "\n")
+        self.report_text.configure(state="disabled")
+        if kind in ("report", "evidence_needed"):
+            self.tabs.select(0)
+
+    def _copy_report(self):
+        text = getattr(self, "_report_markdown", "")
+        if not text:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.status_var.set("Report copied to clipboard as Markdown")
+
     def _build_tabs(self, parent):
         right = ttk.Frame(parent)
         right.grid(row=0, column=1, sticky="nsew", pady=6)
@@ -258,6 +310,42 @@ class SmartHuntApp(tk.Tk):
 
         self.tabs = ttk.Notebook(right)
         self.tabs.grid(row=1, column=0, sticky="nsew")
+
+        # Report — the triaged single finding, and the default landing tab
+        report_frame = ttk.Frame(self.tabs)
+        self.tabs.add(report_frame, text=" ▓ REPORT ")
+        report_frame.rowconfigure(1, weight=1)
+        report_frame.columnconfigure(0, weight=1)
+
+        report_bar = ttk.Frame(report_frame)
+        report_bar.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+        self.report_status = tk.StringVar(value="[ awaiting target ]")
+        ttk.Label(report_bar, textvariable=self.report_status,
+                  style="Head.TLabel").pack(side="left")
+        ttk.Button(report_bar, text="Copy Markdown",
+                   command=self._copy_report).pack(side="right")
+
+        self.report_text = tk.Text(
+            report_frame, wrap="word", bg=theme.PANEL, fg=theme.FG,
+            insertbackground=theme.ACCENT, relief="flat", padx=14, pady=12,
+            font=theme.FONT_MONO, highlightthickness=1,
+            highlightbackground=theme.LINE)
+        self.report_text.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+        report_scroll = ttk.Scrollbar(report_frame, orient="vertical",
+                                      command=self.report_text.yview)
+        report_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 6))
+        self.report_text.configure(yscrollcommand=report_scroll.set)
+        for tag, colour, font in (
+                ("h1", theme.ACCENT, (theme.FONT_MONO[0], 14, "bold")),
+                ("h2", theme.ACCENT, (theme.FONT_MONO[0], 10, "bold")),
+                ("code", theme.MUTED, theme.FONT_MONO),
+                ("crit", theme.ERR, (theme.FONT_MONO[0], 10, "bold"))):
+            self.report_text.tag_configure(tag, foreground=colour, font=font)
+        self.report_text.insert("1.0",
+                                "Run a scan — the single strongest reportable finding "
+                                "lands here,\nwith raw request/response evidence and "
+                                "steps to reproduce.\n")
+        self.report_text.configure(state="disabled")
 
         # Dashboard
         dash = ttk.Frame(self.tabs)
@@ -401,7 +489,7 @@ class SmartHuntApp(tk.Tk):
                 tk.Label(row, text=tool.description, bg=theme.BG, fg=theme.MUTED,
                          font=("Segoe UI", 9), anchor="w").pack(side="left", fill="x", expand=True)
                 if not installed:
-                    tk.Label(row, text=tool.install, bg=theme.BG, fg="#64748b",
+                    tk.Label(row, text=tool.install, bg=theme.BG, fg=theme.DIM,
                              font=("Consolas", 8), anchor="e").pack(side="right")
 
     def _build_statusbar(self):
@@ -506,6 +594,7 @@ class SmartHuntApp(tk.Tk):
             threads=max(1, self.threads_var.get()),
             include_subdomains=self.subs_in_urls_var.get(),
             bruteforce_subdomains=self.bruteforce_var.get(),
+            exhaustive=self.exhaustive_var.get(),
             crawl_depth=self.depth_var.get(), max_pages=self.pages_var.get(),
             max_js_files=self.jsfiles_var.get(), ports=ports,
             subdomain_wordlist=self.sub_wordlist_var.get().strip(),
@@ -526,7 +615,7 @@ class SmartHuntApp(tk.Tk):
         self._scan_start_time = time.time()
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
-        self.pause_btn.config(state="normal", text="⏸")
+        self.pause_btn.config(state="normal", text="PAUSE")
         self.export_btn.config(state="disabled")
         self.open_btn.config(state="disabled")
         self.progress.config(value=0)
@@ -546,11 +635,11 @@ class SmartHuntApp(tk.Tk):
             return
         if self.scanner.pause_event.is_set():
             self.scanner.resume()
-            self.pause_btn.config(text="⏸")
+            self.pause_btn.config(text="PAUSE")
             self.status_var.set("Resumed")
         else:
             self.scanner.pause()
-            self.pause_btn.config(text="▶")
+            self.pause_btn.config(text="RESUME")
             self.status_var.set("Paused — will stop at the next module boundary")
 
     def _tick_elapsed(self):
@@ -607,7 +696,7 @@ class SmartHuntApp(tk.Tk):
         self.results = results
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
-        self.pause_btn.config(state="disabled", text="⏸")
+        self.pause_btn.config(state="disabled", text="PAUSE")
         self.export_btn.config(state="normal")
         self.progress.config(value=100)
         self.elapsed_var.set(f"finished in {results.duration:.1f}s")
@@ -623,6 +712,7 @@ class SmartHuntApp(tk.Tk):
         for sev, lbl in self.sev_labels.items():
             lbl.config(text=f"{sev.upper():<10} {counts.get(sev, 0)}")
 
+        self._render_report(results)
         self.tbl_findings.set_rows(
             [[f.get("severity", ""), f.get("host", ""), f.get("name", ""),
               f.get("detail", ""), f.get("source", "")] for f in results.findings],
@@ -660,8 +750,10 @@ class SmartHuntApp(tk.Tk):
             self.status_var.set(
                 f"Done — {stats['Findings']} findings "
                 f"({stats['Critical/High']} critical/high), {stats['Live hosts']} live hosts")
+            # Land on the triaged report, not the raw list — index 0 since the
+            # Report tab was added ahead of the dashboard.
             if results.findings or results.hosts:
-                self.tabs.select(1)
+                self.tabs.select(0)
 
     # --- export -----------------------------------------------------------
     def _export(self):
