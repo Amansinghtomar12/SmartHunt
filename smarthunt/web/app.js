@@ -324,7 +324,8 @@ function renderReport(report) {
       ${badge}
       <div class="spacer"></div>
       <span class="muted">${esc(report.considered || 0)} findings considered ·
-        ${esc(report.dropped || 0)} not standalone-reportable</span>
+        ${esc(report.dropped || 0)} not standalone-reportable${
+          report.ai_written ? ' · written by AI from the captured evidence' : ''}</span>
       <button class="btn btn-sm" data-role="copy-report">Copy Markdown</button>
     </div>
     <article class="md">${renderMarkdown(report.markdown)}</article>`;
@@ -538,6 +539,10 @@ function collectOptions() {
     sub_wordlist: $('#optSubWl').value,
     content_wordlist: $('#optContentWl').value,
     out: $('#optOut').value,
+    ai: $('#optAi').checked,
+    ai_tuning: $('#optAiTuning').checked,
+    ai_report: $('#optAiReport').checked,
+    ai_model: $('#optAiModel').value,
   };
 }
 
@@ -629,6 +634,10 @@ async function init() {
   state.tools = meta.tools;
   state.categories = meta.categories;
   $('#optOut').value = meta.default_out;
+  const ai = meta.ai || {};
+  $('#aiStatus').textContent = (ai.available ? '● ' : '○ ') + (ai.detail || '');
+  $('#aiStatus').classList.toggle('ai-on', !!ai.available);
+  if (!ai.available) $('#optAi').disabled = true;
   renderArsenal();
   if (window.SmartHuntFX) {
     SmartHuntFX.matrixRain();

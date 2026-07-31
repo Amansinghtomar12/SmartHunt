@@ -9,7 +9,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
-from .. import __version__, report
+from .. import __version__, ai, report
 from ..engine import (DEFAULT_ENABLED, MODE_DOMAIN, MODE_WILDCARD, STAGES,
                       STAGE_TITLES, ScanConfig, Scanner, normalize_target)
 from ..tools import CATEGORIES, REGISTRY, detect_tools
@@ -250,6 +250,34 @@ class SmartHuntApp(tk.Tk):
                   text=("Both accounts must be yours. SmartHunt only reads objects "
                         "Account B has confirmed it owns.")).pack(anchor="w", pady=(4, 0))
 
+        # --- AI assist --------------------------------------------------------
+        ai_box = ttk.Labelframe(side, text=" AI assist ", padding=10)
+        ai_box.pack(fill="x", pady=(0, 8))
+        self.ai_enabled_var = tk.BooleanVar(value=False)
+        self.ai_tuning_var = tk.BooleanVar(value=True)
+        self.ai_report_var = tk.BooleanVar(value=True)
+        self.ai_model_var = tk.StringVar(value="")
+
+        status = ai.detect()
+        ttk.Label(ai_box, wraplength=300,
+                  style="Head.TLabel" if status["available"] else "Muted.TLabel",
+                  text=("● " if status["available"] else "○ ") + status["detail"]
+                  ).pack(anchor="w", pady=(0, 6))
+
+        dark_check(ai_box, "Enable AI assist", self.ai_enabled_var).pack(anchor="w", fill="x")
+        dark_check(ai_box, "  retune the scan while it runs",
+                   self.ai_tuning_var).pack(anchor="w", fill="x")
+        dark_check(ai_box, "  write the report from the evidence",
+                   self.ai_report_var).pack(anchor="w", fill="x")
+        labelled(ai_box, "Model", self.ai_model_var)
+        ttk.Label(ai_box, wraplength=300, style="Muted.TLabel",
+                  text=("It tunes settings and writes prose. It never decides "
+                        "whether something is a bug — every sentence is checked "
+                        "against the captured evidence and dropped if it is not "
+                        "backed by it. Turning this on sends scan metadata and "
+                        "the redacted evidence for the one finding to Anthropic.")
+                  ).pack(anchor="w", pady=(4, 0))
+
         # --- Wordlists ------------------------------------------------------
         wl = ttk.Labelframe(side, text=" Wordlists (optional) ", padding=10)
         wl.pack(fill="x", pady=(0, 8))
@@ -352,6 +380,8 @@ class SmartHuntApp(tk.Tk):
         dropped = report.get("dropped", 0)
         if considered:
             label += f"   ({considered} findings considered, {dropped} not standalone)"
+        if report.get("ai_written"):
+            label += "   · written by AI from the captured evidence"
         self.report_status.set(label)
 
         self.report_text.configure(state="normal")
@@ -700,6 +730,10 @@ class SmartHuntApp(tk.Tk):
             nuclei_severity=self.severity_var.get(),
             output_dir=self.outdir_var.get().strip() or os.getcwd(),
             authorized=True,
+            ai_enabled=self.ai_enabled_var.get(),
+            ai_model=self.ai_model_var.get().strip(),
+            ai_advice=self.ai_tuning_var.get(),
+            ai_report=self.ai_report_var.get(),
         )
 
         self._reset_views()

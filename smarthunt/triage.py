@@ -386,6 +386,27 @@ def _auth_line(finding, ev) -> str:
     return "- **Authentication required:** Not established"
 
 
+def evidence_blocks(finding, host: str) -> tuple[list, list]:
+    """Render the captured exchanges as ``(steps, proof-of-concept)``.
+
+    Both the deterministic report and the AI rewrite render evidence through
+    here, so the raw requests and responses a triager reads are produced by the
+    same code either way — only the prose around them differs.
+    """
+    steps, poc = [], []
+    ev = finding.evidence
+    for number, exchange in enumerate(ev.exchanges if ev else [], 1):
+        curl = f"curl -i -s -X {exchange.method} '{exchange.url}'"
+        steps.append(f"{number}. {exchange.note or 'Send the request below'}:\n"
+                     f"   ```\n   {curl}\n   ```\n"
+                     f"   Server returns `{exchange.status or exchange.error}`"
+                     + (f" — {exchange.note}." if exchange.note else "."))
+        poc.append(f"**Request {number}** — {exchange.note}\n\n```http\n"
+                   f"{exchange.raw_request(host)}\n```\n\n"
+                   f"**Response {number}**\n\n```http\n{exchange.raw_response(host)}\n```")
+    return steps, poc
+
+
 def render_markdown(report: dict) -> str:
     """Render the triage result in the format a bug bounty triager expects."""
     if report["kind"] == "none":
@@ -408,17 +429,7 @@ def render_markdown(report: dict) -> str:
 
     severity, justification = report["severity"], report["justification"]
     ev = finding.evidence
-    steps, poc = [], []
-
-    for n, exchange in enumerate(ev.exchanges if ev else [], 1):
-        curl = f"curl -i -s -X {exchange.method} '{exchange.url}'"
-        steps.append(f"{n}. {exchange.note or 'Send the request below'}:\n"
-                     f"   ```\n   {curl}\n   ```\n"
-                     f"   Server returns `{exchange.status or exchange.error}`"
-                     + (f" — {exchange.note}." if exchange.note else "."))
-        poc.append(f"**Request {n}** — {exchange.note}\n\n```http\n"
-                   f"{exchange.raw_request(host)}\n```\n\n"
-                   f"**Response {n}**\n\n```http\n{exchange.raw_response(host)}\n```")
+    steps, poc = evidence_blocks(finding, host)
 
     reliability = (f"Reproduced {ev.reproduced + 1}× total"
                    + (", including on a fresh session with no prior cookies" if ev.fresh_session else "")

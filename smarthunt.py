@@ -7,7 +7,9 @@
     python smarthunt.py --web --port 9000 --open
     python smarthunt.py --cli example.com    # headless, same engine
     python smarthunt.py --cli '*.example.com' --out results/
-    python smarthunt.py --tools               # list detected external tools
+    python smarthunt.py --cli example.com --ai   # AI retunes the scan and
+                                                 # writes the report
+    python smarthunt.py --tools               # list detected tools and AI status
 """
 
 from __future__ import annotations
@@ -48,7 +50,14 @@ def list_tools():
         else:
             print(f"  {C['dim']}○ {tool.name:<20} {tool.description}")
             print(f"    {' ' * 20} install: {tool.install}{C['reset']}")
-    print(f"\n{inv.summary()}\n")
+    print(f"\n{inv.summary()}")
+
+    from smarthunt import ai
+    status = ai.detect()
+    mark = f"{C['green']}●{C['reset']}" if status["available"] else f"{C['dim']}○{C['reset']}"
+    print(f"\n{C['cyan']}AI assist{C['reset']}")
+    print(f"  {mark} {status['detail']}")
+    print(f"  {C['dim']}enable with --ai (off by default){C['reset']}\n")
 
 
 def run_cli(args):
@@ -95,6 +104,9 @@ def run_cli(args):
         auth_check_url=args.auth_check_url, auth_check_marker=args.auth_check_text,
         victim_headers=_maybe_file(args.victim_headers),
         victim_cookies=args.victim_cookie, victim_bearer=args.victim_bearer,
+        ai_enabled=args.ai, ai_model=args.ai_model,
+        ai_advice=not args.no_ai_tuning, ai_report=not args.no_ai_report,
+        ai_budget=args.ai_budget,
     )
 
     def log(level, message):
@@ -129,8 +141,10 @@ def run_cli(args):
         sev = triaged.get("severity", "")
         color = {"critical": C["red"] + C["bold"], "high": C["red"],
                  "medium": C["yellow"], "low": C["cyan"]}.get(sev, C["dim"])
+        written_by = (" (AI-written from the captured evidence)"
+                      if triaged.get("ai_written") else "")
         print(f"\n{C['bold']}Reportable finding{C['reset']}  "
-              f"{color}[{sev}]{C['reset']}")
+              f"{color}[{sev}]{C['reset']}{C['dim']}{written_by}{C['reset']}")
         print(f"{C['dim']}{'─' * 68}{C['reset']}")
         print(triaged.get("markdown", ""))
     elif kind == "evidence_needed":
@@ -208,6 +222,26 @@ def main():
                             help="Cookie header value for Account B")
     auth_group.add_argument("--victim-bearer", default="",
                             help="bearer token for Account B")
+
+    ai_group = parser.add_argument_group(
+        "AI assist (optional)",
+        "Off unless --ai is passed. Uses the Claude Code CLI on your Claude "
+        "subscription when it is installed, otherwise the anthropic SDK with "
+        "your own API credentials. It retunes the scan and writes the final "
+        "report; it can never decide that something is a bug — every claim it "
+        "writes is checked against the captured evidence and dropped if it is "
+        "not backed by it. Scan metadata (host names, counts, the redacted "
+        "evidence for the one finding) leaves your machine when this is on.")
+    ai_group.add_argument("--ai", action="store_true",
+                          help="enable the AI assist")
+    ai_group.add_argument("--ai-model", default="",
+                          help="model to use (default: the module default)")
+    ai_group.add_argument("--ai-budget", type=int, default=8,
+                          help="max model calls per scan (default 8)")
+    ai_group.add_argument("--no-ai-tuning", action="store_true",
+                          help="with --ai: write the report but do not retune the scan")
+    ai_group.add_argument("--no-ai-report", action="store_true",
+                          help="with --ai: retune the scan but keep the template report")
 
     parser.add_argument("--exhaustive", "-E", action="store_true",
                         help="leave nothing behind: raise every cap and loop "

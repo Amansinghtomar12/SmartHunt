@@ -75,6 +75,16 @@ def export_markdown(results, path):
     return path
 
 
+def export_finding_report(results, path):
+    """Write the one triaged finding — the file you actually submit."""
+    markdown = (results.report or {}).get("markdown", "")
+    if not markdown:
+        return None
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(markdown.rstrip() + "\n")
+    return path
+
+
 def export_txt_lists(results, outdir):
     """Write the raw lists hunters usually pipe into other tools."""
     os.makedirs(outdir, exist_ok=True)
@@ -236,5 +246,9 @@ def export_all(results, outdir):
         export_markdown(results, os.path.join(outdir, f"{safe}.md")),
         export_csv(results, os.path.join(outdir, f"{safe}-findings.csv")),
     ]
+    submission = export_finding_report(
+        results, os.path.join(outdir, f"{safe}-REPORT.md"))
+    if submission:
+        written.append(submission)
     written += export_txt_lists(results, os.path.join(outdir, "lists"))
     return written

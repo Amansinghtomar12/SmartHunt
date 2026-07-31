@@ -36,7 +36,7 @@ from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, report
+from . import __version__, ai, report
 from .engine import (DEFAULT_ENABLED, STAGES, STAGE_TITLES, ScanConfig, Scanner,
                      normalize_target)
 from .tools import CATEGORIES, REGISTRY, detect_tools
@@ -345,6 +345,7 @@ class Handler(BaseHTTPRequestHandler):
                 "categories": CATEGORIES,
                 "tools_found": len(inv.available),
                 "tools_total": len(REGISTRY),
+                "ai": ai.detect(),
                 "cwd": os.getcwd(),
                 "default_out": os.path.join(os.getcwd(), "smarthunt-results"),
             })
@@ -462,6 +463,11 @@ class Handler(BaseHTTPRequestHandler):
             victim_headers=str(body.get("victim_headers") or ""),
             victim_cookies=str(body.get("victim_cookies") or ""),
             victim_bearer=str(body.get("victim_bearer") or ""),
+            ai_enabled=bool(body.get("ai", False)),
+            ai_model=str(body.get("ai_model") or ""),
+            ai_advice=bool(body.get("ai_tuning", True)),
+            ai_report=bool(body.get("ai_report", True)),
+            ai_budget=as_int("ai_budget", 8, 1, 40),
         )
         try:
             SESSION.start(config)

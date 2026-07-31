@@ -24,7 +24,7 @@ import threading
 import time
 from dataclasses import dataclass, field, asdict
 
-from . import accesscontrol, auth, cve, jsrecon, modules, owasp, triage, wordlists
+from . import accesscontrol, ai, auth, cve, jsrecon, modules, owasp, triage, wordlists
 from .modules import Finding, HostResult, SEVERITY_RANK
 from .tools import ToolInventory, detect_tools, run as tools_run
 
@@ -126,6 +126,12 @@ class ScanConfig:
     victim_headers: str = ""             # Account B — enables IDOR proof
     victim_cookies: str = ""
     victim_bearer: str = ""
+    # --- AI assist (optional, off by default) ----------------------------
+    ai_enabled: bool = False             # opt-in: scan metadata leaves the machine
+    ai_model: str = ""                   # blank = the module default
+    ai_advice: bool = True               # let it retune the scan mid-run
+    ai_report: bool = True               # let it write the final report
+    ai_budget: int = 8                   # hard cap on model calls per scan
 
     def wordlist_lines(self, path: str) -> list[str]:
         if not path or not os.path.isfile(path):
@@ -158,6 +164,7 @@ class ScanResults:
     findings: list[dict] = field(default_factory=list)
     report: dict = field(default_factory=dict)   # the single triaged finding
     tools_used: list[str] = field(default_factory=list)
+    ai: dict = field(default_factory=dict)       # what the AI assist did, if enabled
 
     @property
     def duration(self) -> float:
@@ -216,6 +223,10 @@ class Scanner:
         self.victim_session = (auth.make_authenticated_session(self.victim, modules.make_session)
                                if self.victim.configured else None)
         self._wildcard_ips = None   # cached across exhaustive rounds
+        # Built lazily inside the scan thread so a missing provider is reported
+        # in the scan log rather than at construction time.
+        self.ai = None
+        self.ai_paths: set[str] = set()   # extra content-discovery paths it asked for
 
     # --- control ----------------------------------------------------------
     def start(self):
@@ -357,6 +368,83 @@ class Scanner:
                 finding.confidence = "high"
                 self.log("found", f"  sqlmap confirmed injection on {finding.param}")
 
+    # --- AI assist --------------------------------------------------------
+    def _ai_context(self, phase, live, urls, findings) -> dict:
+        """The scan's own numbers — no credentials, no response bodies."""
+        cfg = self.config
+        severities: dict[str, int] = {}
+        for finding in findings:
+            severities[finding.severity] = severities.get(finding.severity, 0) + 1
+        return {
+            "phase": phase,
+            "scope": (f"*.{cfg.target}" if cfg.mode == MODE_WILDCARD else cfg.target),
+            "mode": cfg.mode,
+            "counts": {
+                "subdomains": len(self.results.subdomains),
+                "live_hosts": len(live),
+                "urls": len(urls),
+                "js_files": len(self.results.js_files),
+                "js_endpoints": len(self.results.js_endpoints),
+                "verified_api_endpoints": sum(1 for e in self.results.api_endpoints
+                                              if e.get("api")),
+                "parameters": len(self.results.params.get("names", [])),
+                "findings_by_severity": severities,
+            },
+            "settings": {key: getattr(cfg, key) for key in ai.TUNABLE},
+            "live_host_sample": sorted(live)[:40],
+            "technologies": sorted({tech for hr in live.values()
+                                    for tech in (hr.tech or [])})[:30],
+            "tools_installed": sorted(self.inv.available),
+            "elapsed_seconds": int(time.time() - self.results.started),
+        }
+
+    def _ai_checkpoint(self, phase, live, urls, findings):
+        """Let the assistant retune the scan, inside fixed limits.
+
+        Only settings on :data:`smarthunt.ai.TUNABLE` are applied, each clamped
+        to the range the UI already permits, and suggested hostnames are dropped
+        unless they sit inside the authorised scope. The assistant cannot reach
+        the evidence gate, the authorisation flag or the target.
+        """
+        if not (self.ai and self.config.ai_advice) or self.stop_event.is_set():
+            return
+        self.log("stage", f"▶ AI assist — reviewing progress ({phase})")
+        advice = self.ai.advise(self._ai_context(phase, live, urls, findings),
+                                self.config.target)
+        if not advice:
+            return
+
+        if advice["assessment"]:
+            self.log("info", f"  {advice['assessment']}")
+        was_exhaustive = self.config.exhaustive
+        for adjustment in advice["adjustments"]:
+            setting, value = adjustment["setting"], adjustment["value"]
+            before = getattr(self.config, setting)
+            if before == value:
+                continue
+            setattr(self.config, setting, value)
+            self.log("found", f"  adjusted {setting}: {before} → {value}"
+                              + (f" ({adjustment['why']})" if adjustment["why"] else ""))
+        if self.config.exhaustive and not was_exhaustive:
+            # Switching exhaustive on has to bring its raised caps with it, or
+            # the extra rounds run against the quick-scan ceilings.
+            self._apply_exhaustive_limits()
+        if advice["focus_paths"]:
+            fresh = set(advice["focus_paths"]) - self.ai_paths
+            self.ai_paths |= fresh
+            if fresh:
+                self.log("info", f"  queued {len(fresh)} extra path(s) for content "
+                                 f"discovery")
+        for note in advice["notes"]:
+            self.log("info", f"  note: {note}")
+
+        new_hosts = [h for h in advice["focus_hosts"] if h not in live]
+        if new_hosts and not self.stop_event.is_set():
+            self.log("info", f"  probing {len(new_hosts)} suggested in-scope host(s)")
+            live.update(modules.probe_http(sorted(new_hosts), self.inv, self.log,
+                                           self.stop_event, self.session,
+                                           threads=self.config.threads))
+
     # --- pipeline ---------------------------------------------------------
     def _run(self):
         cfg = self.config
@@ -378,6 +466,9 @@ class Scanner:
             self.log("info", auth.summarise(self.attacker, self.victim))
             self._verify_sessions()
             self._apply_exhaustive_limits()
+            if cfg.ai_enabled:
+                self.ai = ai.Assistant.create(self.log, model=cfg.ai_model,
+                                              budget=cfg.ai_budget)
 
             hosts: set[str] = {cfg.target}
             live: dict[str, HostResult] = {}
@@ -449,6 +540,12 @@ class Scanner:
                 modules.fingerprint(live, self.log, self.stop_event, self.session)
                 end("tech")
 
+            # The first checkpoint: the live surface is known but nothing deep
+            # has run yet, so a depth or breadth adjustment still changes the
+            # outcome. On a large wildcard scope this is where the right crawl
+            # settings stop being a guess.
+            self._ai_checkpoint("reconnaissance complete", live, urls, findings)
+
             # --- 6. subdomain takeover --------------------------------------
             if "takeover" in planned and not self.stop_event.is_set():
                 begin("takeover")
@@ -515,10 +612,18 @@ class Scanner:
                                                      self.log, self.stop_event)
                 end("params")
 
+            # A second checkpoint, now that the JavaScript has been read: what
+            # the bundles named is the best signal for which paths are worth
+            # requesting, and content discovery has not run yet.
+            self._ai_checkpoint("endpoints mined, before content discovery",
+                                live, urls, findings)
+
             # --- 10. content discovery -----------------------------------------
             if "content" in planned and not self.stop_event.is_set():
                 begin("content")
                 paths = cfg.wordlist_lines(cfg.content_wordlist) or wordlists.CONTENT_PATHS
+                if self.ai_paths:
+                    paths = list(dict.fromkeys(list(paths) + sorted(self.ai_paths)))
                 content_hits = modules.discover_content(
                     live, paths, self.inv, self.log, self.stop_event, self.session,
                     threads=cfg.threads, wordlist_path=cfg.content_wordlist)
@@ -578,11 +683,22 @@ class Scanner:
             # bundle names an API on a third. One pass stops at the first hop;
             # this keeps going until the frontier is empty.
             if cfg.exhaustive and not self.stop_event.is_set():
-                for round_no in range(2, cfg.max_rounds + 1):
+                # A while loop rather than range(): cfg.max_rounds can be raised
+                # by an AI checkpoint between rounds, and a range would have
+                # been frozen at the old value — the log would report an
+                # adjustment that never took effect.
+                round_no = 1
+                while round_no < cfg.max_rounds:
+                    round_no += 1
                     if self.stop_event.is_set():
                         break
                     before = (len(hosts), len(urls), len(live))
                     self.log("stage", f"▶ Exhaustive round {round_no}/{cfg.max_rounds}")
+                    # Between rounds is where retuning pays for itself: the
+                    # previous round's yield says whether to push further or
+                    # stop, and cfg.max_rounds is one of the settings on offer.
+                    self._ai_checkpoint(f"exhaustive round {round_no} starting",
+                                        live, urls, findings)
 
                     new_hosts = self._recurse_hosts(cfg, res, hosts, urls, live)
                     fresh = new_hosts - hosts
@@ -654,6 +770,18 @@ class Scanner:
                         "justification": report["justification"],
                         "finding": report["finding"].as_dict(),
                     })
+                    # Only ever a rewrite of a finding that already passed the
+                    # evidence gate. If the rewrite fails its own checks, the
+                    # verified template stands — the AI cannot create, promote
+                    # or soften a finding, only phrase one.
+                    if self.ai and cfg.ai_report:
+                        self.log("stage", "▶ AI assist — writing the report")
+                        host = report["finding"].host or cfg.target
+                        written = self.ai.write_report(report, host)
+                        if written:
+                            res.report["markdown_template"] = res.report["markdown"]
+                            res.report["markdown"] = written
+                            res.report["ai_written"] = True
                 elif report["kind"] == "evidence_needed":
                     res.report.update({
                         "missing": report["missing"],
@@ -661,6 +789,8 @@ class Scanner:
                     })
 
             res.findings = [f.as_dict() for f in findings]
+            if self.ai:
+                res.ai = self.ai.summary()
 
         except Exception as exc:  # pragma: no cover - surfaced in the GUI
             import traceback

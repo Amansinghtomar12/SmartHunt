@@ -31,10 +31,13 @@ _MASKS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)\bAIza[A-Za-z0-9_-]{30,}"), "GOOGLE_API_KEY"),
     (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
                 r"[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"), "PRIVATE_KEY"),
-    # KEY=value / KEY: value in .env files, YAML and shell exports.
-    (re.compile(r"(?im)^(\s*(?:export\s+)?[A-Z0-9_]*"
+    # KEY=value / KEY: value in .env files, YAML, shell exports, query strings
+    # and JSON. Deliberately not anchored to the start of a line: the same
+    # assignment shows up mid-string inside a JSON body or a URL, and a redactor
+    # that only covers the tidy .env case is not a redactor.
+    (re.compile(r"""(?im)((?:^|[\s"',;(\[{&?])\s*(?:export\s+)?[A-Z0-9_]*"""
                 r"(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|APIKEY|API_KEY|PRIVATE|CREDENTIAL)"
-                r"[A-Z0-9_]*\s*[=:]\s*)(\S+)"), r"\1REDACTED_SECRET"),
+                r"""[A-Z0-9_]*\s*[=:]\s*)([^\s"',;)\]}&]+)"""), r"\1REDACTED_SECRET"),
     # "password": "value" in JSON/JS objects.
     (re.compile(r"""(?i)(["']?(?:password|passwd|secret|token|api_?key|private_?key)"""
                 r"""["']?\s*:\s*)["']([^"']{3,})["']"""), r'\1"REDACTED_SECRET"'),

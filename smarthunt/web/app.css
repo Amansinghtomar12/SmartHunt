@@ -517,6 +517,9 @@ td a { color: var(--accent-2); }
   body::after { display: none; }
 }
 
+/* ── AI assist status ─────────────────────────────────────── */
+#aiStatus.ai-on { color: var(--accent); text-shadow: var(--glow); }
+
 /* ── session / account inputs ─────────────────────────────── */
 .acct-title {
   font-size: 11px; text-transform: uppercase; letter-spacing: .07em;

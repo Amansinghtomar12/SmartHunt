@@ -10,7 +10,9 @@ accounts you control — broken access control. Then it applies an evidence gate
 to everything it found and writes up the single strongest one, with raw
 request/response proof and `curl` reproduction steps.
 
-Desktop app, browser UI, and headless CLI, all over the same engine.
+Desktop app, browser UI, and headless CLI, all over the same engine. Optionally,
+Claude tunes the scan as it runs and writes the report from the captured
+evidence — [fenced so it can never invent a finding](#ai-assist--optional-and-fenced-in).
 
 ![SmartHunt running a scan](docs/demo.gif)
 
@@ -175,6 +177,81 @@ just isn't the headline.
 > checks the unauthenticated case to kill the "this was public all along"
 > mistake, reproduces before reporting, and says "nothing reportable" rather
 > than padding the output.
+
+---
+
+## AI assist — optional, and fenced in
+
+Turn it on and Claude does two jobs during a scan. It does **not** get a vote on
+whether something is a bug.
+
+**It retunes the scan while it runs.** On a big wildcard scope the right crawl
+depth, page cap and round count are impossible to guess before you have seen the
+surface. At three checkpoints — after reconnaissance, after the JavaScript has
+been mined, and between exhaustive rounds — it reads the scan's own numbers and
+adjusts. It can also queue extra paths worth requesting and name in-scope hosts
+worth probing.
+
+**It writes the report.** Instead of the fixed template, you get prose about
+*your* finding: what the attacker did, what came back, what the endpoint should
+have done. Same evidence, written the way a triager wants to read it.
+
+### What it is not allowed to do
+
+The evidence gate runs first and decides alone. The AI is only ever handed a
+finding that has already passed it, and can only rephrase what is there:
+
+| Fence | Effect |
+|---|---|
+| **Runs after triage** | It cannot create a finding, promote "evidence needed" to reportable, or overturn "nothing found" |
+| **Prose slots only** | Raw requests, responses, `curl` steps and the severity line are rendered by code. It fills named text fields — it never touches the proof |
+| **One step per exchange** | The reproduction steps must match the captured exchanges exactly, so it cannot invent a request that was never sent |
+| **Every sentence checked** | Hedging (`may`, `could`, `potentially`, `appears`), unproven escalation (`RCE`, `account takeover`, `exfiltration`), a URL that is not in the evidence, a status code that was never returned, or a restated severity → **the whole rewrite is discarded** and the verified template is used |
+| **Whitelisted settings** | It returns settings, not conclusions. Only eight are honoured, each clamped to the range the UI already allows. It cannot reach the target, the authorization flag, the output path or the evidence gate |
+| **Scope-locked** | A suggested hostname is dropped unless it sits inside the authorised apex. No amount of model creativity pushes a scan out of your program |
+| **Budgeted** | Hard cap on model calls per scan (default 8) |
+
+When a rewrite is rejected the log says exactly why, line by line — you see the
+call being made:
+
+```
+▶ AI assist — writing the report
+  AI report rejected — using the verified template instead:
+    · speculative language: 'could'
+    · impact claim beyond the evidence: 'remote code execution'
+```
+
+That is the whole design. Adding a language model to a security tool must not
+add a single unproven claim, so this one fails closed: no provider, a refused
+request, a malformed reply, a rewrite that overreaches — every one of those ends
+with the deterministic report, and the scan is unaffected.
+
+### Which Claude does it use?
+
+Detected automatically, in this order:
+
+| | Requirement | Billing |
+|---|---|---|
+| **Claude Code CLI** | `claude` on your PATH and logged in | Your **Claude subscription** (Pro/Max) — no API key |
+| **Anthropic SDK** | `pip install anthropic` + credentials (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or `ant auth login`) | Anthropic API, billed separately from a subscription |
+
+A Max plan is a *subscription*, not API credit — the two bill separately. The
+CLI route is what lets SmartHunt run on the plan you already pay for: if you can
+run `claude` in a terminal, SmartHunt can use it.
+
+```bash
+python smarthunt.py --tools                     # shows which provider was found
+python smarthunt.py --cli example.com --ai      # tune the scan + write the report
+python smarthunt.py --cli example.com --ai --no-ai-tuning   # report only
+```
+
+In the desktop app and the browser UI it is the **AI assist** panel in the
+sidebar, with the detected provider shown above the switch.
+
+**What leaves your machine when it is on:** scan metadata (host names,
+technologies, counts, current settings) at each checkpoint, and — for the single
+triaged finding only — the redacted evidence, with credentials already masked to
+placeholders. Nothing is sent when the switch is off, which is the default.
 
 ---
 
@@ -416,9 +493,10 @@ Every scan exports:
 
 ```
 smarthunt-results/example_com/
+├── example_com-REPORT.md     # the one triaged finding — this is what you submit
 ├── example_com.json          # everything, including the triaged report
 ├── example_com.html          # standalone HTML report
-├── example_com.md            # Markdown, ready to paste into a submission
+├── example_com.md            # full scan summary in Markdown
 ├── example_com-findings.csv
 └── lists/
     ├── subdomains.txt  live-hosts.txt  urls.txt
@@ -441,6 +519,9 @@ python smarthunt.py --help
 | `--auth-cookie` / `--auth-bearer` / `--auth-headers` | Session for Account A |
 | `--auth-check-url` / `--auth-check-text` | Prove the session is live |
 | `--victim-cookie` / `--victim-bearer` / `--victim-headers` | Account B, enables IDOR |
+| `--ai` | AI assist: retune the scan and write the report |
+| `--ai-model` / `--ai-budget` | Model override, and the cap on calls per scan |
+| `--no-ai-tuning` / `--no-ai-report` | Use only one half of the assist |
 | `--collaborator` | Host that observes SSRF callbacks |
 | `--cve-online` | Also query OSV and NVD |
 | `--no-sqlmap` | Skip sqlmap confirmation on proven injection points |

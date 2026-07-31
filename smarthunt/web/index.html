@@ -119,6 +119,20 @@
     </section>
 
     <section class="panel">
+      <h2>AI assist <span class="muted-sm">(optional)</span></h2>
+      <div id="aiStatus" class="muted-sm" style="margin-bottom:8px">checking…</div>
+      <label class="check"><input id="optAi" type="checkbox"><span>Enable AI assist</span></label>
+      <label class="check"><input id="optAiTuning" type="checkbox" checked><span>retune the scan while it runs</span></label>
+      <label class="check"><input id="optAiReport" type="checkbox" checked><span>write the report from the evidence</span></label>
+      <label class="field"><span>Model</span><input id="optAiModel" type="text" placeholder="default"></label>
+      <div class="muted-sm">It tunes settings and writes prose. It never decides
+        whether something is a bug — every sentence is checked against the
+        captured evidence and dropped if it is not backed by it. Turning this on
+        sends scan metadata and the redacted evidence for the one finding to
+        Anthropic.</div>
+    </section>
+
+    <section class="panel">
       <h2>Wordlists <span class="muted-sm">(optional)</span></h2>
       <label class="field"><span>Subdomains</span><input id="optSubWl" type="text" placeholder="built-in"></label>
       <label class="field"><span>Content paths</span><input id="optContentWl" type="text" placeholder="built-in"></label>
