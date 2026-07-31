@@ -28,8 +28,13 @@ class SmartHuntApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"SmartHunt v{__version__} — Bug Hunting Recon Suite")
-        self.geometry("1500x920")
-        self.minsize(1120, 720)
+        # Tk's baseline is 1.333 pixels per point. A HiDPI display raises that,
+        # so every point-sized font comes out bigger — and any measurement given
+        # in raw pixels has to follow, or the sidebar clips the labels it was
+        # sized around.
+        self.ui_scale = max(1.0, float(self.tk.call("tk", "scaling")) / 1.3333)
+        self.geometry(f"{int(1500 * self.ui_scale)}x{int(920 * self.ui_scale)}")
+        self.minsize(int(1120 * self.ui_scale), int(720 * self.ui_scale))
         theme.apply(self)
 
         self.inventory = detect_tools()
@@ -55,7 +60,7 @@ class SmartHuntApp(tk.Tk):
 
         body = ttk.Frame(self)
         body.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-        body.columnconfigure(0, minsize=368)
+        body.columnconfigure(0, minsize=int(368 * self.ui_scale))
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
 
@@ -88,7 +93,8 @@ class SmartHuntApp(tk.Tk):
         outer = ttk.Frame(parent)
         outer.grid(row=0, column=0, sticky="nsew", padx=(0, 10), pady=6)
 
-        canvas = tk.Canvas(outer, bg=theme.BG, highlightthickness=0, width=350)
+        canvas = tk.Canvas(outer, bg=theme.BG, highlightthickness=0,
+                           width=int(350 * self.ui_scale))
         scroll = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         side = ttk.Frame(canvas)
         side.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -206,7 +212,7 @@ class SmartHuntApp(tk.Tk):
         sess = ttk.Labelframe(side, text=" Session — authenticated testing ",
                               padding=10)
         sess.pack(fill="x", pady=(0, 10))
-        ttk.Label(sess, wraplength=300, style="Muted.TLabel",
+        ttk.Label(sess, wraplength=int(300 * self.ui_scale), style="Muted.TLabel",
                   text=("Paste a session you already have: a Cookie value, a bearer "
                         "token, or a raw header block from Burp/devtools. A second "
                         "account you also control enables IDOR proof.")
@@ -246,7 +252,7 @@ class SmartHuntApp(tk.Tk):
                   style="Head.TLabel").pack(anchor="w", pady=(6, 2))
         labelled(sess, "Cookie", self.victim_cookie_var)
         labelled(sess, "Bearer token", self.victim_bearer_var)
-        ttk.Label(sess, wraplength=300, style="Muted.TLabel",
+        ttk.Label(sess, wraplength=int(300 * self.ui_scale), style="Muted.TLabel",
                   text=("Both accounts must be yours. SmartHunt only reads objects "
                         "Account B has confirmed it owns.")).pack(anchor="w", pady=(4, 0))
 
@@ -259,7 +265,7 @@ class SmartHuntApp(tk.Tk):
         self.ai_model_var = tk.StringVar(value="")
 
         status = ai.detect()
-        ttk.Label(ai_box, wraplength=300,
+        ttk.Label(ai_box, wraplength=int(300 * self.ui_scale),
                   style="Head.TLabel" if status["available"] else "Muted.TLabel",
                   text=("● " if status["available"] else "○ ") + status["detail"]
                   ).pack(anchor="w", pady=(0, 6))
@@ -270,7 +276,7 @@ class SmartHuntApp(tk.Tk):
         dark_check(ai_box, "  write the report from the evidence",
                    self.ai_report_var).pack(anchor="w", fill="x")
         labelled(ai_box, "Model", self.ai_model_var)
-        ttk.Label(ai_box, wraplength=300, style="Muted.TLabel",
+        ttk.Label(ai_box, wraplength=int(300 * self.ui_scale), style="Muted.TLabel",
                   text=("It tunes settings and writes prose. It never decides "
                         "whether something is a bug — every sentence is checked "
                         "against the captured evidence and dropped if it is not "
@@ -560,7 +566,7 @@ class SmartHuntApp(tk.Tk):
 
         ttk.Label(right, text="\nAuthorized testing only — scan targets you own or have "
                              "written permission to test.", style="Muted.TLabel",
-                  wraplength=380, justify="left").pack(anchor="w", pady=(14, 0))
+                  wraplength=int(380 * self.ui_scale), justify="left").pack(anchor="w", pady=(14, 0))
 
     def _build_arsenal(self):
         canvas = tk.Canvas(self.arsenal, bg=theme.BG, highlightthickness=0)
@@ -583,11 +589,11 @@ class SmartHuntApp(tk.Tk):
         header = ttk.Frame(inner)
         header.pack(fill="x", pady=(0, 10))
         ttk.Label(header, text=self.inventory.summary(), style="Head.TLabel",
-                  wraplength=900, justify="left").pack(anchor="w")
+                  wraplength=int(900 * self.ui_scale), justify="left").pack(anchor="w")
         ttk.Label(header, text="Every tool below is optional — SmartHunt falls back to built-in "
                                "pure-Python modules for anything that is missing. Install more "
                                "tools for deeper coverage.",
-                  style="Muted.TLabel", wraplength=900, justify="left").pack(anchor="w", pady=(4, 0))
+                  style="Muted.TLabel", wraplength=int(900 * self.ui_scale), justify="left").pack(anchor="w", pady=(4, 0))
 
         for category in CATEGORIES:
             tools = [t for t in REGISTRY if t.category == category]

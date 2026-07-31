@@ -1,41 +1,48 @@
 # SmartHunt
 
-A bug-hunting recon suite that ends in **one proven, reportable finding** — not a
-list of 30 things you still have to triage yourself.
+**A bug bounty tool that gives you one bug you can actually report.**
 
-Point it at a domain or a wildcard, press START, and it runs the full pipeline:
-subdomain enumeration, HTTP probing, JavaScript mining, endpoint verification,
-content discovery, the OWASP Top 10, known-CVE matching, and — given two
-accounts you control — broken access control. Then it applies an evidence gate
-to everything it found and writes up the single strongest one, with raw
-request/response proof and `curl` reproduction steps.
+Most scanners hand you a list of 40 "issues" and leave you to work out which
+ones are real. SmartHunt does the opposite. It hunts, checks its own work, throws
+away everything it cannot prove, and gives you **one finding with proof** — the
+exact requests it sent, the exact answers it got back, and the steps to repeat
+it.
 
-Desktop app, browser UI, and headless CLI, all over the same engine. Optionally,
-Claude tunes the scan as it runs and writes the report from the captured
-evidence — [fenced so it can never invent a finding](#ai-assist--optional-and-fenced-in).
+You give it a website. It does the rest.
 
 ![SmartHunt running a scan](docs/demo.gif)
 
-<sub>A real scan, recorded live: stages turning green as they complete, the
-elapsed clock advancing, counters climbing, then the triaged report.</sub>
+<sub>A real scan, recorded live: each step turns green as it finishes, the
+counters climb, and the finished report appears at the end.</sub>
+
+It comes in three forms, all doing the same thing:
+
+- a **desktop app**
+- a **web page** you open in your browser
+- a **command line** version for servers
+
+There is also an optional **AI helper** that adjusts the scan while it runs and
+writes the report for you. It works with the Claude plan you already pay for.
+[Jump to that section →](#ai-helper-optional)
 
 ---
 
 ## Setup
 
-New to this? Follow these five steps exactly — they take about two minutes.
+New to this? Do these five steps. It takes about two minutes.
 
-### 1. Check you have Python 3.9 or newer
+### 1. Check you have Python
 
 ```bash
 python3 --version
 ```
 
-If that prints `Python 3.9` or higher, you're fine. If the command isn't found,
-install Python from [python.org/downloads](https://www.python.org/downloads/)
-(tick **"Add Python to PATH"** on Windows), then reopen your terminal.
+If it prints `Python 3.9` or higher, you're good. If the command isn't found,
+get Python from [python.org/downloads](https://www.python.org/downloads/) — on
+Windows, tick **"Add Python to PATH"** during install — then close and reopen
+your terminal.
 
-> On Windows, use `python` instead of `python3` in every command below.
+> On Windows, type `python` instead of `python3` in every command below.
 
 ### 2. Download SmartHunt
 
@@ -44,22 +51,22 @@ git clone https://github.com/Amansinghtomar12/SmartHunt
 cd SmartHunt
 ```
 
-No `git`? Click the green **Code** button at the top of this page →
-**Download ZIP**, unzip it, then `cd` into the folder.
+Don't have `git`? Click the green **Code** button at the top of this page →
+**Download ZIP**, unzip it, then open a terminal in that folder.
 
-### 3. Install the one dependency
+### 3. Install the one thing it needs
 
 ```bash
 pip install -r requirements.txt
 ```
 
-That installs `requests`. Nothing else is required.
+That's it — one package called `requests`. Nothing else.
 
 <details>
-<summary>Recommended: install into a virtual environment instead</summary>
+<summary>Better way: install it in its own little box (virtual environment)</summary>
 
-Keeps SmartHunt's dependency out of your system Python. Some Linux distros
-require this and will refuse a plain `pip install`.
+This keeps SmartHunt separate from the rest of your system. Some Linux systems
+insist on it and will refuse a plain `pip install`.
 
 ```bash
 python3 -m venv .venv
@@ -67,152 +74,166 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Run `source .venv/bin/activate` each time you open a new terminal.
+Run the `activate` line again each time you open a new terminal.
 </details>
 
-### 4. Start it
+### 4. Open it
 
-Pick whichever you prefer — all three run the same engine.
+Pick whichever you like — all three run exactly the same scan.
 
 ```bash
-python3 smarthunt.py --web       # browser UI, then open http://127.0.0.1:8777
+python3 smarthunt.py --web       # browser version → open http://127.0.0.1:8777
 python3 smarthunt.py             # desktop app
 python3 smarthunt.py --cli example.com
 ```
 
-**If you're not sure, use `--web`.** It works everywhere, needs nothing extra,
-and you drive it from your browser.
+**Not sure? Use `--web`.** It works on every computer, needs nothing extra, and
+you drive it from your browser.
 
 ### 5. Run your first scan
 
-1. Type a domain you own or are authorised to test — e.g. `example.com`
+1. Type a website you own or are allowed to test — for example `example.com`
 2. Press **START**
-3. Confirm the authorization prompt
-4. When it finishes, read the **Report** tab
+3. Tick the box confirming you're allowed to test it
+4. When it finishes, open the **Report** tab
 
-Results are also written to `smarthunt-results/` next to the project folder.
+Everything is also saved into a `smarthunt-results/` folder next to the project.
 
 ---
 
-## Troubleshooting
+## If something goes wrong
 
-| Message | What to do |
+| What you see | What to do |
 |---|---|
-| `ModuleNotFoundError: No module named 'requests'` | You skipped step 3, or you're in a different terminal than the one where you activated the venv. Re-run `pip install -r requirements.txt`. |
-| `error: externally-managed-environment` | Your distro blocks system-wide pip. Use the virtual environment shown in step 3. |
-| `Tkinter is not installed` | Only affects the desktop app. Either use `--web` instead, or install it: `sudo apt install python3-tk` (Debian/Ubuntu), `sudo dnf install python3-tkinter` (Fedora), `brew install python-tk` (macOS). |
-| `Address already in use` | Something else is on port 8777. Use another: `python3 smarthunt.py --web --port 9000`. |
+| `No module named 'requests'` | You skipped step 3 — or you're in a different terminal from the one where you ran it. Run `pip install -r requirements.txt` again. |
+| `error: externally-managed-environment` | Your Linux blocks system-wide installs. Use the virtual environment box in step 3. |
+| `Tkinter is not installed` | Only affects the desktop app. Use `--web` instead, or install it: `sudo apt install python3-tk` (Ubuntu/Debian), `sudo dnf install python3-tkinter` (Fedora), `brew install python-tk` (Mac). |
+| `Address already in use` | Something else is using port 8777. Pick another: `python3 smarthunt.py --web --port 9000`. |
 | `python3: command not found` | Try `python`. On Windows that's the normal name. |
-| Browser shows nothing at 127.0.0.1:8777 | Check the terminal is still running the server — it must stay open. Don't use `localhost:` with a different port than the one printed. |
-| `0/112 external tools found` | Expected and fine. Every stage has a pure-Python fallback. Install optional tools later with `./install-tools.sh`. |
-| Scan finds nothing | Confirm the domain resolves and is reachable, and that you typed it without `https://`. |
+| Browser page is blank | The terminal running the server must stay open. And use the exact address it printed. |
+| `0/112 external tools found` | **This is fine.** SmartHunt has its own built-in version of every step. Extra tools are optional. |
+| Scan finds nothing | Check the site is online, and that you typed it without `https://`. |
 
-Still stuck? Run `python3 smarthunt.py --tools` — if that prints a tool list,
-your install is working and the problem is with the target or the network.
+Still stuck? Run `python3 smarthunt.py --tools`. If that prints a list, your
+install is fine and the problem is the target or your network.
 
 ---
 
-## Optional: more tools, deeper results
+## Optional: add more tools
 
-**Nothing below is required.** SmartHunt ships a pure-Python implementation of
-every stage, so a fresh clone produces real results with zero setup. It also
-detects and drives **112 optional tools across 20 categories**, and gets faster
-and deeper with each one you install.
+**You don't need any of this.** SmartHunt has its own built-in version of every
+step, so a fresh download works straight away.
+
+It can also find and use **112 well-known hacking tools** if you have them
+installed, and gets faster and deeper with each one.
 
 ```bash
-./install-tools.sh          # installs what it can; skips what it can't
-python3 smarthunt.py --tools   # shows which ones were found
+./install-tools.sh             # installs what it can, skips what it can't
+python3 smarthunt.py --tools   # shows which ones it found
 ```
 
-Most need Go, Python or Rust already present. Install a handful you care about
-rather than all 112 — `subfinder`, `httpx`, `katana` and `nuclei` alone make a
-large difference.
+Don't install all 112. Just `subfinder`, `httpx`, `katana` and `nuclei` already
+make a big difference.
 
 ---
 
-## Two target modes
+## Two ways to give it a target
 
-| Mode | Input | What it does |
-|---|---|---|
-| **Single Domain** | `example.com` | Deep-dive one host: crawl it, pull every JavaScript file, mine those files for endpoints, parameters and secrets, verify which endpoints are real, then test what it found. |
-| **Wildcard** | `*.example.com` | Go wide first — every subdomain source and tool available — then run the *entire* deep-dive against everything that came back alive. |
-
-Typing `*.example.com` switches to wildcard mode automatically.
-
----
-
-## One reportable bug, not a wall of noise
-
-Every scan ends in a triage stage that applies an evidence gate to the whole
-finding set and produces exactly one of three outcomes.
-
-![The triaged report](docs/report.gif)
-
-| Outcome | When | What you get |
-|---|---|---|
-| **Report** | Every evidence field is filled and the behaviour reproduces | One finding, severity graded from proven impact, raw request/response, numbered `curl` steps, remediation |
-| **Evidence needed** | Something looks real but a proof is missing | The exact tests still owed — never a half-written report |
-| **Nothing reportable** | No candidate clears the gate | "No reportable vulnerability found with the current evidence." |
-
-Two rules do the heavy lifting.
-
-**A large class of scanner output is never a standalone report.** Missing
-headers, version banners, `x-powered-by`, exposed Swagger, wildcard CORS,
-directory listings, SSRF candidates without a collaborator callback, endpoint
-discovery — all filtered, each with its reason logged so you can see the call
-being made rather than wondering where a finding went.
-
-**Severity comes from what was proven, not from the bug class.** Error-based SQL
-injection proves injection, not data exfiltration, so it grades High rather than
-Critical and the report says exactly why. The winner is re-verified at report
-time — reproduced twice, retried on a fresh cookie-free session — and
-credentials are masked (`DB_PASSWORD=REDACTED_SECRET`) before anything is
-written to disk.
-
-The full finding list still exports to JSON and CSV for your own digging. It
-just isn't the headline.
-
-> **On false positives.** No tool can promise zero, and one that claims to is
-> lying. SmartHunt is built to fail *closed*: it drops what it cannot prove,
-> checks the unauthenticated case to kill the "this was public all along"
-> mistake, reproduces before reporting, and says "nothing reportable" rather
-> than padding the output.
-
----
-
-## AI assist — optional, and fenced in
-
-Turn it on and Claude does two jobs during a scan. It does **not** get a vote on
-whether something is a bug.
-
-**It retunes the scan while it runs.** On a big wildcard scope the right crawl
-depth, page cap and round count are impossible to guess before you have seen the
-surface. At three checkpoints — after reconnaissance, after the JavaScript has
-been mined, and between exhaustive rounds — it reads the scan's own numbers and
-adjusts. It can also queue extra paths worth requesting and name in-scope hosts
-worth probing.
-
-**It writes the report.** Instead of the fixed template, you get prose about
-*your* finding: what the attacker did, what came back, what the endpoint should
-have done. Same evidence, written the way a triager wants to read it.
-
-### What it is not allowed to do
-
-The evidence gate runs first and decides alone. The AI is only ever handed a
-finding that has already passed it, and can only rephrase what is there:
-
-| Fence | Effect |
+| You type | What happens |
 |---|---|
-| **Runs after triage** | It cannot create a finding, promote "evidence needed" to reportable, or overturn "nothing found" |
-| **Prose slots only** | Raw requests, responses, `curl` steps and the severity line are rendered by code. It fills named text fields — it never touches the proof |
-| **One step per exchange** | The reproduction steps must match the captured exchanges exactly, so it cannot invent a request that was never sent |
-| **Every sentence checked** | Hedging (`may`, `could`, `potentially`, `appears`), unproven escalation (`RCE`, `account takeover`, `exfiltration`), a URL that is not in the evidence, a status code that was never returned, or a restated severity → **the whole rewrite is discarded** and the verified template is used |
-| **Whitelisted settings** | It returns settings, not conclusions. Only eight are honoured, each clamped to the range the UI already allows. It cannot reach the target, the authorization flag, the output path or the evidence gate |
-| **Scope-locked** | A suggested hostname is dropped unless it sits inside the authorised apex. No amount of model creativity pushes a scan out of your program |
-| **Budgeted** | Hard cap on model calls per scan (default 8) |
+| `example.com` | **One website, in depth.** Crawls it, downloads every JavaScript file, digs through them for hidden addresses, passwords and settings, then tests what it found. |
+| `*.example.com` | **The whole company.** First finds every sub-site (`mail.example.com`, `api.example.com`, `staging.example.com`…), then runs that same deep scan on every one that's alive. |
 
-When a rewrite is rejected the log says exactly why, line by line — you see the
-call being made:
+Typing the `*.` version switches it automatically. You don't have to press
+anything.
+
+---
+
+## One bug, and only if it's proven
+
+Here's the part that makes SmartHunt different.
+
+At the end of every scan it looks at everything it found and asks one question
+about each: **can I prove this?** Then it gives you exactly one of three answers.
+
+![The finished report](docs/report.gif)
+
+| Answer | When you get it | What you get |
+|---|---|---|
+| **Report** | It has proof and the bug happens again when re-tested | One finding, with the raw requests and answers, `curl` commands to repeat it, and how to fix it |
+| **Evidence needed** | Something looks wrong but a piece of proof is missing | A short list of exactly what's still missing — never a half-finished report |
+| **Nothing reportable** | Nothing passed the check | "No reportable vulnerability found with the current evidence." |
+
+Two rules do most of the work.
+
+**Some things are never a bug on their own.** Missing security headers, a version
+number showing, a public API doc page, a directory listing — SmartHunt finds
+them, but it won't report them, because a bug bounty program will just close the
+ticket. Each one is dropped with the reason written in the log, so you can see
+the decision instead of wondering where it went.
+
+**Severity comes from what was proved, not from the scary name.** If SmartHunt
+proves a database error but never pulls data out, it grades that High, not
+Critical — and says why. Before writing anything it re-tests the bug twice, tries
+again on a completely fresh session, and blanks out any passwords or keys
+(`DB_PASSWORD=REDACTED_SECRET`) so you can paste the report anywhere safely.
+
+The full list of everything it saw is still saved to JSON and CSV. It's just not
+the headline.
+
+> **About false positives.** No tool can promise zero, and any tool that promises
+> zero is lying to you. SmartHunt is built to **fail quietly rather than guess**:
+> it drops anything it can't prove, checks whether the "private" data was public
+> all along, repeats the test before believing it, and will happily tell you it
+> found nothing.
+
+---
+
+## AI helper (optional)
+
+Switch it on and Claude helps with two things during a scan. It is **off by
+default**, and it **never decides whether something is a bug**.
+
+![The AI helper](docs/ai.gif)
+
+**1. It adjusts the scan while it's running.**
+On a big company-wide scan, nobody knows the right settings before they see the
+site. So at three points — after the first look around, after reading the
+JavaScript, and between deep rounds — Claude reads the scan's own numbers and
+changes the settings. A real example from a test run:
+
+```
+▶ AI assist — reviewing progress (reconnaissance complete)
+  Reconnaissance reports completion but found zero URLs, JS files, endpoints
+  and parameters despite one confirmed live host […] this points to a
+  discovery gap rather than a genuinely thin target given the Apache/PHP stack.
+  adjusted crawl_depth: 1 → 2
+  adjusted exhaustive: False → True
+  adjusted max_rounds: 4 → 6
+  queued 6 extra path(s) for content discovery
+```
+
+**2. It writes the report.**
+Instead of a fill-in-the-blanks template, you get a proper write-up about *your*
+bug: what the attacker did, what came back, and what the site should have done
+instead. Same proof, written the way a bug bounty reviewer wants to read it.
+
+### The AI is kept on a very short leash
+
+This is the important bit. The proof check runs **first and alone**. Claude only
+ever sees a bug that has already passed it, and can only put it into words.
+
+| Rule | What it means |
+|---|---|
+| **It runs last** | It cannot invent a bug, upgrade "evidence needed" into a report, or argue with "nothing found" |
+| **It only writes the words** | The raw requests, the answers, the `curl` commands and the severity are all produced by the tool itself. Claude fills in text boxes — it never touches the proof |
+| **One step per request** | The steps must match the requests that were actually sent, so it can't add a request that never happened |
+| **Every sentence is checked** | Wishy-washy words (`may`, `could`, `possibly`, `appears`), scary claims that weren't proved (`RCE`, `account takeover`), a web address that isn't in the proof, an error code that never happened, or a changed severity → **the whole thing is thrown away** and the tool's own report is used instead |
+| **Only 8 settings** | It can suggest settings, not conclusions. Only eight are accepted, each limited to what the sliders already allow. It cannot touch the target, your permission checkbox, or the proof check |
+| **It cannot leave your scope** | A sub-site it suggests is ignored unless it belongs to the domain you're allowed to test |
+| **It has a budget** | A hard limit on how many times it can be called per scan (8 by default), with one call always held back so the report still gets written on a long run |
+
+When it oversteps, the log tells you exactly what it tried:
 
 ```
 ▶ AI assist — writing the report
@@ -221,133 +242,143 @@ call being made:
     · impact claim beyond the evidence: 'remote code execution'
 ```
 
-That is the whole design. Adding a language model to a security tool must not
-add a single unproven claim, so this one fails closed: no provider, a refused
-request, a malformed reply, a rewrite that overreaches — every one of those ends
-with the deterministic report, and the scan is unaffected.
+That's the whole idea. Putting an AI inside a security tool must not add a
+single unproven sentence — so this one fails safe. No AI installed, a refused
+request, a broken reply, a report that overreaches: every one of those quietly
+falls back to the normal report, and your scan is unaffected.
 
-### Which Claude does it use?
+### Does it use my Claude plan?
 
-Detected automatically, in this order:
+Yes — through the **Claude Code** app, which logs in with your normal Claude
+account (Pro or Max). No API key, no second bill.
 
-| | Requirement | Billing |
+| | What you need | Who pays |
 |---|---|---|
-| **Claude Code CLI** | `claude` on your PATH and logged in | Your **Claude subscription** (Pro/Max) — no API key |
-| **Anthropic SDK** | `pip install anthropic` + credentials (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or `ant auth login`) | Anthropic API, billed separately from a subscription |
+| **Claude Code** (easiest) | `claude` installed and logged in | Your **Claude subscription** — the plan you already have |
+| **Anthropic API** | `pip install anthropic` and an API key (or `ant auth login`) | Billed separately as API usage |
 
-A Max plan is a *subscription*, not API credit — the two bill separately. The
-CLI route is what lets SmartHunt run on the plan you already pay for: if you can
-run `claude` in a terminal, SmartHunt can use it.
+A Max plan is a *subscription*, not API credit — they're two different things.
+The Claude Code route is what lets SmartHunt run on the plan you already pay for.
+**If you can type `claude` in a terminal, SmartHunt can use it.**
+
+Check what it found:
 
 ```bash
-python smarthunt.py --tools                     # shows which provider was found
-python smarthunt.py --cli example.com --ai      # tune the scan + write the report
-python smarthunt.py --cli example.com --ai --no-ai-tuning   # report only
+python3 smarthunt.py --tools
 ```
 
-In the desktop app and the browser UI it is the **AI assist** panel in the
-sidebar, with the detected provider shown above the switch.
+```
+AI assist
+  ● Claude Code CLI — uses your Claude subscription login
+  enable with --ai (off by default)
+```
 
-**What leaves your machine when it is on:** scan metadata (host names,
-technologies, counts, current settings) at each checkpoint, and — for the single
-triaged finding only — the redacted evidence, with credentials already masked to
-placeholders. Nothing is sent when the switch is off, which is the default.
+A green `●` means you're set. Then:
+
+```bash
+python3 smarthunt.py --cli example.com --ai                  # adjust + write
+python3 smarthunt.py --cli example.com --ai --no-ai-tuning   # only write the report
+```
+
+In the desktop app and the browser it's the **AI assist** box in the left
+sidebar, with the detected account shown above the switch.
+
+**What leaves your computer when it's on:** the scan's numbers (site names,
+technologies, counts, current settings), and — only for the single bug it
+reports — the proof, with passwords and keys already blanked out. Nothing is
+sent when the switch is off, and off is the default.
 
 ---
 
-## Authenticated testing
+## Logging in (testing as a real user)
 
-Unauthenticated scanning only ever sees the front door. Hand SmartHunt a session
-you already have and every stage — crawling, JS collection, content discovery,
-the OWASP checks — runs logged in.
+Scanning without logging in only ever sees the front door. Give SmartHunt a
+session you already have, and every step runs as a logged-in user.
 
 ```bash
-python smarthunt.py --cli target.com \
+python3 smarthunt.py --cli target.com \
   --auth-cookie "session=abc123; csrftoken=xyz" \
   --auth-check-url https://target.com/account --auth-check-text "your-username"
 ```
 
-Sessions can be a `Cookie` value, a bearer token, or a **raw header block pasted
-straight from Burp or devtools** — hop-by-hop headers are stripped and `Cookie:`
-is split into the jar automatically.
+A "session" can be a cookie, a token, or **a block of headers copied straight
+out of Burp or your browser's developer tools** — SmartHunt cleans it up for you.
 
-**The session is verified before the scan leans on it.** A stale cookie doesn't
-fail loudly: the app serves the login page with HTTP 200 and every finding
-afterwards is quietly about that login page. Give a check URL and a string that
-only appears when logged in, and SmartHunt says so once, up front.
+**It checks the session is alive before trusting it.** An expired cookie doesn't
+announce itself: the site just shows the login page, and every "finding" after
+that is really about the login page. Give it a page that needs login and a word
+that only appears when you're logged in, and it tells you straight away.
 
-### Two accounts → proven IDOR
+### Two accounts = a proven access bug
 
-Supply a **second account you also control** and SmartHunt tests OWASP A01,
-Broken Access Control — the most common serious bug class, and one no
-single-session scanner can prove:
+Give it **a second account you also own** and SmartHunt can prove the most
+common serious bug there is: reading someone else's data.
 
 ```bash
-python smarthunt.py --cli target.com \
-  --auth-cookie   "session=ATTACKER_A" \
-  --victim-cookie "session=VICTIM_B" \
-  --auth-check-url https://target.com/account --auth-check-text "attacker-name"
+python3 smarthunt.py --cli target.com \
+  --auth-cookie   "session=ACCOUNT_A" \
+  --victim-cookie "session=ACCOUNT_B" \
+  --auth-check-url https://target.com/account --auth-check-text "account-a-name"
 ```
 
-Every candidate endpoint gets three requests under three identities:
+For every address that looks like it points at one specific record, it sends
+three requests as three different people:
 
-1. **Victim B** requests their own object and is served it — so the object exists, is private, and B owns it.
-2. An **unauthenticated** client requests the same URL and is refused — so it is not simply public, by far the most common false positive.
-3. **Attacker A**, a different logged-in account, requests it and is served B's data anyway.
+1. **Account B** asks for its own record and gets it — so the record exists and belongs to B.
+2. **Nobody** (logged out) asks for the same thing and is refused — so it isn't just public. This is the number one false alarm, killed right here.
+3. **Account A** — a different logged-in user — asks for it and gets B's data anyway.
 
-All three must hold. If the anonymous request succeeds, the resource is public
-and nothing is reported. If Attacker A gets 401/403/404, or their own data
-rather than B's, nothing is reported. SmartHunt also re-requests with a
-different object ID: identical responses mean the endpoint ignores the
-identifier and is returning a generic page, not B's record.
+All three must happen. If the logged-out request succeeds, the data was public
+and nothing is reported. If Account A gets refused, or just gets its own data,
+nothing is reported. It even asks for a different record ID to make sure the page
+isn't simply ignoring the number and showing everyone the same thing.
 
-**Both accounts must be yours.** SmartHunt only ever reads objects Account B has
-itself confirmed it owns, and every request is a read.
+**Both accounts must be yours.** SmartHunt only reads records Account B has
+already confirmed it owns, and never writes or deletes anything.
 
 ---
 
-## OWASP Top 10 coverage
+## What it actually tests
 
-A dedicated stage tests the discovered attack surface across all ten 2021
-categories. Every check is **non-destructive** — bounded GET-style probes, no
-payload that writes, deletes or degrades the target.
+There's a standard list of the ten most common web security problems, called the
+OWASP Top 10. SmartHunt has a dedicated step for all ten. Every test is
+**safe** — it only looks, never writes, deletes or breaks anything.
 
-| | Category | What is actually tested |
+| | Problem | What SmartHunt checks |
 |---|---|---|
-| A01 | Broken Access Control | **IDOR with two sessions**, path traversal, open redirect |
-| A02 | Cryptographic Failures | Secrets in JS bundles, transport checks |
-| A03 | Injection | SQL injection (5 engines), reflected XSS, SSTI, CRLF |
-| A04 | Insecure Design | Rate-limit and workflow probes |
-| A05 | Security Misconfiguration | Credentialed CORS reflection, risky methods, exposed `.env` / `.git` / actuator |
-| A06 | Vulnerable Components | Version banners matched against known CVEs |
-| A07 | Auth Failures | JWT exposure, session attributes |
-| A08 | Integrity Failures | Third-party scripts without Subresource Integrity |
-| A09 | Logging Failures | Stack traces and verbose errors leaking internals |
-| A10 | SSRF | URL-taking parameters; `--collaborator` to prove the callback |
+| A01 | Reading other people's data | **Two-account access test**, path traversal, open redirects |
+| A02 | Leaked secrets | Passwords and API keys left inside JavaScript files |
+| A03 | Injection | SQL injection (5 database types), reflected XSS, template injection, CRLF |
+| A04 | Bad design | Rate-limit and workflow checks |
+| A05 | Misconfiguration | CORS holes, dangerous HTTP methods, exposed `.env` / `.git` / admin endpoints |
+| A06 | Old software | Version numbers matched against known published bugs |
+| A07 | Login problems | Exposed tokens, weak session settings |
+| A08 | Untrusted scripts | Third-party JavaScript loaded without integrity checks |
+| A09 | Logging problems | Error pages leaking internal details |
+| A10 | Server-side request forgery | Settings that take a URL; add `--collaborator` to prove it |
 
-Two categories are honest about their limits: **SSRF** cannot be proven without a
-collaborator host you control, and **A09** is not externally observable. Both are
-recorded as candidates rather than dressed up as findings.
+Two of them are honest about their limits: **SSRF** can't be proved without a
+server of yours to catch the callback, and **A09** can't be seen from outside.
+Both are noted as "worth checking" rather than dressed up as findings.
 
 ```bash
-python smarthunt.py --cli example.com --collaborator abc123.oast.fun
+python3 smarthunt.py --cli example.com --collaborator abc123.oast.fun
 ```
 
 ---
 
-## Known-CVE matching
+## Old software with known bugs
 
-Every fingerprinted banner and library version is matched against a curated
-table of high-signal, remotely-checkable CVEs — Apache path traversal, Ghostcat,
-Spring4Shell, ProxyShell, Drupalgeddon, Heartbleed, jQuery XSS and prototype
-pollution. `--cve-online` additionally queries OSV and NVD.
+Every version number SmartHunt spots gets matched against a list of famous,
+publicly known bugs — Apache path traversal, Ghostcat, Spring4Shell, ProxyShell,
+Drupalgeddon, Heartbleed, old jQuery, and more. Add `--cve-online` to also check
+the public OSV and NVD databases.
 
-**These are never reported as findings.** A version banner proves nothing:
-banners lie, distributions backport fixes without bumping the string, and the
-vulnerable code path may not even be reachable. Every match is labelled
-inference, carries low confidence, has an empty impact field, and is refused by
-the triage gate. What each one carries instead is the safe check that confirms
-or kills it by hand:
+**These are never reported as findings, on purpose.** A version number proves
+nothing: it can be faked, Linux distributions fix bugs without changing the
+number, and the broken code might not even be reachable. So each match is marked
+as a *lead*, not a finding, and the proof check refuses it. What you get instead
+is the one safe test that settles it:
 
 ```
 [critical] target.com: CVE-2021-41773 — Apache path traversal (2.4.49)
@@ -356,37 +387,35 @@ or kills it by hand:
 
 ---
 
-## Wildcard goes deep on every subdomain
+## Wildcard mode goes deep, not just wide
 
-Finding subdomains is the easy half. In wildcard mode SmartHunt runs the *whole*
-domain-mode pipeline against everything it found alive — pulling each host's
-JavaScript, mining it for endpoints, then **verifying those endpoints host by
-host**.
+Finding sub-sites is the easy half. Most tools stop there. In wildcard mode
+SmartHunt runs the **entire** deep scan against every sub-site that's alive —
+downloading each one's JavaScript, digging out the addresses hidden inside, and
+then **testing those addresses on every sub-site**.
 
-That last step matters. Reading a bundle gives you path strings; `/api/v2/billing`
-is a guess until something answers it. SmartHunt joins every mined path onto
-every live host and probes it, because staging subdomains routinely expose an
-API that production does not. What comes back — with status, content type and
-allowed methods — is the real, callable attack surface, and it feeds straight
-into the OWASP and access-control stages.
+That last step is the useful one. Reading a JavaScript file gives you text like
+`/api/v2/billing` — that's a guess until something answers it. SmartHunt tries
+every address it found on every live sub-site, because a staging server very
+often exposes an API that the main site keeps hidden. Whatever answers is the
+real attack surface, and it feeds straight into the security tests.
 
 ---
 
-## Exhaustive mode — nothing left behind
+## Exhaustive mode — leave nothing behind
 
 ```bash
-python smarthunt.py --cli '*.example.com' --exhaustive     # or -E
-python smarthunt.py --cli example.com -E --rounds 6
+python3 smarthunt.py --cli '*.example.com' --exhaustive     # or just -E
+python3 smarthunt.py --cli example.com -E --rounds 6
 ```
 
-A normal scan has caps that keep it quick. `--exhaustive` raises them and turns
-discovery into a **loop that runs until a round finds nothing new**.
+A normal scan has limits so it finishes quickly. `--exhaustive` raises those
+limits and turns the search into a **loop that keeps going until a round finds
+nothing new**.
 
-Each round's discoveries seed the next. A subdomain found by permutation hosts
-JavaScript naming a second subdomain, whose bundle names an API on a third — a
-single pass stops at the first hop. Every round re-mines three sources:
-hostnames embedded in collected URLs, hostnames referenced inside JavaScript,
-and a fresh permutation pass seeded by what *this scan* has actually seen.
+Each round feeds the next. A sub-site found by guessing hosts JavaScript that
+names a second sub-site, whose JavaScript names an API on a third. One pass stops
+at the first hop; this doesn't.
 
 ```
 ▶ Exhaustive round 2/3
@@ -396,108 +425,98 @@ and a fresh permutation pass seeded by what *this scan* has actually seen.
   converged after 3 rounds — nothing new to find
 ```
 
-The ceilings go up rather than away, and `--rounds` bounds the loop, because an
-unbounded crawl over a large wildcard scope never terminates — which is not the
-same thing as thorough.
+The limits go *up*, not away, and `--rounds` caps the loop — because a search
+with no end never finishes, which is not the same thing as thorough.
 
-**Wildcard DNS is detected first.** Many domains answer *every* name, so
-bruteforce and permutation would otherwise "find" thousands of hosts that do not
-exist — and in exhaustive mode that becomes an endless supply. SmartHunt queries
-names nobody would register, learns the wildcard's addresses, and drops any
-guessed host that only resolves there. Hosts from passive sources are kept,
-because something attested to those.
+**It checks for fake sub-sites first.** Many companies answer *every* possible
+name, so guessing would otherwise "find" thousands of sub-sites that don't
+exist. SmartHunt asks for names nobody would ever register, learns what a fake
+answer looks like, and throws away any guess that matches it.
 
 ---
 
-## The arsenal — 112 tools, all driven
+## The arsenal — 112 tools, all driven for you
 
-![Arsenal panel](docs/arsenal.gif)
+![The tool arsenal](docs/arsenal.gif)
 
-Where tools find *different* things, SmartHunt runs them all and merges: every
-subdomain source, all permutation generators, both takeover scanners, every JS
-analyser (jsluice, LinkFinder, SecretFinder, xnLinkFinder, mantra, trufflehog,
-gitleaks), every content fuzzer.
+When tools find *different* things, SmartHunt runs them all and merges the
+results: every sub-site finder, every JavaScript analyser, every secret scanner,
+every content fuzzer.
 
-Where tools are interchangeable implementations of the same scan — port
-scanners, DNS resolvers — the best available one runs, because three tools
-repeating one scan is just three times the traffic. `sqlmap` is the exception
-that proves the rule: it only runs against a parameter whose database error has
-already been captured, turning a proven injection into a confirmed one instead
-of hammering every parameter on the site.
+When tools do the *same* job — port scanners, DNS lookups — it picks the best one
+you have installed, because running three tools to do one job is just three times
+the traffic. `sqlmap` is the exception: it only runs against a spot where a
+database error has *already* been captured, turning a proven bug into a confirmed
+one instead of hammering the whole site.
 
-Categories: subdomain enumeration and permutation, DNS, HTTP probing, port
-scanning, OSINT/attack surface, crawling, JavaScript analysis, parameter
-discovery, content discovery, API & GraphQL, vulnerability scanning, injection
-testing, takeover, cloud storage, TLS, CMS scanning, out-of-band, screenshots
-and secret scanning.
+The categories: sub-site discovery, DNS, HTTP checking, port scanning, OSINT,
+crawling, JavaScript analysis, parameter discovery, content discovery, APIs and
+GraphQL, vulnerability scanning, injection testing, takeover, cloud storage, TLS,
+CMS scanning, out-of-band, screenshots and secret scanning.
 
-Adding a tool is one row in `smarthunt/extra_tools.py`.
+Adding a new tool is one line in `smarthunt/extra_tools.py`.
 
 ---
 
-## Interface
+## The desktop app and the browser look the same
 
-Both front-ends share one engine, one palette and one feature set — a phosphor
-terminal skin with matrix rain, a boot sequence, count-up readouts, a spinner on
-the running stage and a glitch when a finding lands. All motion respects
-`prefers-reduced-motion`.
+Both run the same engine and have the same features — a green-on-black terminal
+look with falling matrix rain, a boot-up sequence, counters that count up, a
+spinner on whatever step is running, and a glitch when a finding lands. All the
+motion turns itself off if your system asks for reduced motion.
 
 ![SmartHunt desktop app](docs/desktop.gif)
 
-<sub>The desktop app running the same scan — the stage spinner, the counters
-easing up, and the report opening when it finishes.</sub>
+<sub>The desktop app running the same scan.</sub>
 
-The browser UI runs on Python's stdlib `http.server`, so it needs no extra
-dependency. Because it lives on an origin every page in your browser can reach,
-it defends itself on three fronts: `Host` must be a loopback name (blocking DNS
-rebinding), every mutating request must carry a per-process `X-SmartHunt-Token`
-stamped into the page, and a cross-origin `Origin` is rejected. Without that
-token check, any site you happened to be visiting could quietly start scans from
-your machine.
+The browser version uses Python's own built-in web server, so it needs nothing
+extra installed. Because it lives at an address any web page could try to reach,
+it protects itself three ways: it only accepts `localhost` addresses, every
+action needs a secret token that only its own page is given, and requests coming
+from other websites are rejected outright. Without that, any site you happened to
+have open could quietly start scans from your computer.
 
-On a remote box, don't expose the port — forward it:
+Running it on a remote server? Don't open the port to the internet — tunnel it:
 
 ```bash
-ssh -L 8777:127.0.0.1:8777 you@your-vps    # then browse http://127.0.0.1:8777
+ssh -L 8777:127.0.0.1:8777 you@your-server    # then open http://127.0.0.1:8777
 ```
 
 ---
 
-## The pipeline
+## What happens, step by step
 
-| # | Stage | What it does |
+| # | Step | What it does |
 |---|---|---|
-| 1 | Subdomain Enumeration | Every passive source and installed tool, plus DNS bruteforce and permutation (wildcard mode) |
-| 2 | DNS Resolution | Resolves hosts to IPs and CNAMEs; detects wildcard DNS |
-| 3 | Port Scanning | Top ports or your own list |
-| 4 | HTTP Probing | Finds live web services, status, title, server |
-| 5 | Technology Fingerprinting | Headers, cookies, body markers |
-| 6 | Subdomain Takeover | Dangling CNAMEs against 25+ provider fingerprints |
-| 7 | URL / Endpoint Collection | Archives, crawlers, and a built-in crawler |
-| 8 | JavaScript Gathering & Analysis | Pulls every JS file; mines endpoints, parameters, secrets |
-| 9 | API Endpoint Verification | Probes mined paths against every live host; keeps what answers |
-| 10 | Parameter Discovery | Names and values from URLs, tools and the corpus |
-| 11 | Content Discovery | Curated paths plus your wordlist |
-| 12 | Vulnerability Checks | Exposed files, headers, transport, nuclei |
-| 13 | OWASP Top 10 Testing | Active non-destructive checks across all ten categories |
-| 14 | Known CVE Matching | Version-inferred CVEs, flagged for manual confirmation |
-| 15 | Access Control / IDOR | Attacker A vs Victim B (needs two sessions) |
-| 16 | Screenshots | Visual triage of live hosts |
-| — | **Triage** | Evidence gate → the single reportable finding |
+| 1 | Sub-site discovery | Every public source and installed tool, plus name guessing (wildcard mode) |
+| 2 | DNS lookup | Turns names into IP addresses; spots fake wildcard answers |
+| 3 | Port scanning | Common ports, or your own list |
+| 4 | HTTP check | Finds which sites are actually alive |
+| 5 | Technology detection | Works out what software is running |
+| 6 | Takeover check | Looks for sub-sites pointing at services nobody owns any more |
+| 7 | Address collection | Web archives, crawlers, and its own built-in crawler |
+| 8 | JavaScript analysis | Downloads every JS file; digs out addresses, settings and secrets |
+| 9 | Endpoint verification | Tries those addresses on every live site; keeps the ones that answer |
+| 10 | Parameter discovery | Finds the input fields a site accepts |
+| 11 | Content discovery | Looks for hidden files and folders |
+| 12 | Vulnerability checks | Exposed files, headers, transport, nuclei |
+| 13 | OWASP Top 10 | Safe active tests across all ten categories |
+| 14 | Known-bug matching | Old versions flagged for you to confirm by hand |
+| 15 | Access control | Account A vs Account B (needs two logins) |
+| 16 | Screenshots | Pictures of every live site |
+| — | **Proof check** | Throws out everything unproven → one report |
 
 ---
 
-## Results
-
-Every scan exports:
+## What you get at the end
 
 ```
 smarthunt-results/example_com/
-├── example_com-REPORT.md     # the one triaged finding — this is what you submit
-├── example_com.json          # everything, including the triaged report
-├── example_com.html          # standalone HTML report
-├── example_com.md            # full scan summary in Markdown
-├── example_com-findings.csv
+├── example_com-REPORT.md     # the one bug — this is what you submit
+├── example_com.json          # everything it saw
+├── example_com.html          # a report you can open in a browser
+├── example_com.md            # full summary
+├── example_com-findings.csv  # open in Excel
 └── lists/
     ├── subdomains.txt  live-hosts.txt  urls.txt
     ├── js-files.txt    endpoints.txt   parameters.txt
@@ -505,52 +524,54 @@ smarthunt-results/example_com/
 
 ---
 
-## Options
+## All the options
 
 ```bash
-python smarthunt.py --help
+python3 smarthunt.py --help
 ```
 
-| Flag | Purpose |
+| Command | What it does |
 |---|---|
-| `--web` / `--port` / `--open` | Browser UI |
-| `--cli` / `-y` | Headless, skip the authorization prompt |
-| `--exhaustive` / `-E` / `--rounds` | Loop discovery until nothing new appears |
-| `--auth-cookie` / `--auth-bearer` / `--auth-headers` | Session for Account A |
-| `--auth-check-url` / `--auth-check-text` | Prove the session is live |
-| `--victim-cookie` / `--victim-bearer` / `--victim-headers` | Account B, enables IDOR |
-| `--ai` | AI assist: retune the scan and write the report |
-| `--ai-model` / `--ai-budget` | Model override, and the cap on calls per scan |
-| `--no-ai-tuning` / `--no-ai-report` | Use only one half of the assist |
-| `--collaborator` | Host that observes SSRF callbacks |
-| `--cve-online` | Also query OSV and NVD |
-| `--no-sqlmap` | Skip sqlmap confirmation on proven injection points |
-| `--threads` / `--depth` / `--max-pages` / `--max-js` | Tuning |
-| `--stages` / `--all` | Pick modules explicitly |
-| `--sub-wordlist` / `--content-wordlist` | Your own wordlists |
-| `--tools` | Show which of the 112 tools were detected |
+| `--web` / `--port` / `--open` | Browser version |
+| `--cli` / `-y` | Terminal version, skip the confirmation prompt |
+| `--ai` | Turn on the AI helper |
+| `--ai-model` / `--ai-budget` | Choose the model, and how many AI calls per scan |
+| `--no-ai-tuning` / `--no-ai-report` | Use only half of the AI helper |
+| `--exhaustive` / `-E` / `--rounds` | Keep searching until nothing new turns up |
+| `--auth-cookie` / `--auth-bearer` / `--auth-headers` | Log in as Account A |
+| `--auth-check-url` / `--auth-check-text` | Prove the login actually works |
+| `--victim-cookie` / `--victim-bearer` / `--victim-headers` | Account B — enables the access-control test |
+| `--collaborator` | Your own server, to catch SSRF callbacks |
+| `--cve-online` | Also check the public bug databases |
+| `--no-sqlmap` | Don't run sqlmap even on a proven injection |
+| `--threads` / `--depth` / `--max-pages` / `--max-js` | Speed and depth |
+| `--stages` / `--all` | Choose exactly which steps run |
+| `--sub-wordlist` / `--content-wordlist` | Use your own word lists |
+| `--tools` | Show which of the 112 tools — and which AI — were found |
 
 ---
 
-## Authorization
+## Please read this part
 
-SmartHunt sends real, active traffic. Both UIs require you to confirm
-authorization before a scan starts, and the CLI needs `-y`.
+SmartHunt sends **real traffic to real websites**. Both apps make you tick a box
+first, and the terminal version needs `-y`.
 
-**Only scan targets you own or have written permission to test** — an in-scope
-bug bounty program, a client engagement with a signed statement of work, or your
-own infrastructure. Check the program's rules before running authenticated or
-automated testing; some restrict both, and a session makes the traffic
-attributable to your account.
+**Only scan websites you own, or have written permission to test** — an in-scope
+bug bounty program, a client who has signed a contract, or your own servers.
+Check the program's rules before using the login or AI features; some programs
+restrict automated testing, and logging in makes the traffic traceable to your
+account.
 
-The access-control checks require two accounts **you control**. They only read
-objects Account B has itself confirmed it owns, and never touch real users' data.
+The two-account test needs **two accounts you control**. It only ever reads
+records that Account B has confirmed it owns, and never touches anyone else's
+data.
 
 ---
 
 ## Requirements
 
-- Python 3.9+
-- `requests` (the only dependency)
-- Tkinter for the desktop app — optional, `--web` and `--cli` work without it
-- Any of the 112 external tools you care to install — all optional
+- Python 3.9 or newer
+- `requests` — the only thing you must install
+- Tkinter, for the desktop app only — `--web` and `--cli` work without it
+- Claude Code, only if you want the AI helper — optional
+- Any of the 112 external tools you feel like installing — all optional

@@ -43,7 +43,9 @@ body { display: flex; flex-direction: column; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px; border-bottom: 1px solid var(--line); flex: none;
 }
-.brand { display: flex; align-items: baseline; gap: 8px; }
+/* flex: none — the brand must never shrink, or its tagline overflows into the
+   ASCII banner sitting next to it. */
+.brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
 .logo { color: var(--accent); font-size: 20px; }
 .name { color: var(--accent); font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
 .tagline { color: var(--muted); font-size: 12px; }
@@ -506,10 +508,12 @@ td a { color: var(--accent-2); }
 .ascii {
   font-family: var(--mono); font-size: 9px; line-height: 1.05; white-space: pre;
   color: var(--accent); text-shadow: var(--glow); opacity: .9; margin: 0;
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
 }
-/* The boot log lives in the same row, so the banner only appears when
-   there is genuinely room for both. */
-@media (max-width: 1900px) { .ascii { display: none; } }
+/* The brand, the boot log and the tool counter share this row, so the banner
+   only appears when there is genuinely room for all of them — 1900px was not,
+   and the banner landed on top of the tagline. */
+@media (max-width: 2200px) { .ascii { display: none; } }
 
 /* Honour a user's reduced-motion preference — the CRT effects are decoration. */
 @media (prefers-reduced-motion: reduce) {

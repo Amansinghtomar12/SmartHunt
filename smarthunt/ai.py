@@ -513,11 +513,17 @@ def sanitise_advice(advice: dict, apex: str) -> dict:
 class Assistant:
     """A budgeted, fail-soft wrapper around one provider."""
 
+    #: Calls held back from the tuning checkpoints so the report writer always
+    #: has one. Tuning fires once per exhaustive round, so without this a long
+    #: run spends the whole budget on advice and the report — the job that
+    #: actually matters — silently falls back to the template.
+    REPORT_RESERVE = 1
+
     def __init__(self, provider, log, detail: str = "", budget: int = DEFAULT_BUDGET):
         self.provider = provider
         self.log = log
         self.detail = detail
-        self.budget = budget
+        self.budget = max(1, budget)
         self.calls = 0
         self.errors: list[str] = []
         self.advice_log: list[dict] = []
@@ -536,9 +542,14 @@ class Assistant:
         log("info", f"AI assist: {info['detail']}")
         return cls(provider, log, detail=info["detail"], budget=budget)
 
-    def _ask_json(self, prompt: str, max_tokens: int = 4000) -> dict | None:
-        if self.calls >= self.budget:
-            self.log("info", f"  AI budget spent ({self.budget} calls) — skipping")
+    def _ask_json(self, prompt: str, max_tokens: int = 4000,
+                  reserved: bool = False) -> dict | None:
+        # Only the report writer may spend the reserved calls.
+        ceiling = self.budget if reserved else max(1, self.budget - self.REPORT_RESERVE)
+        if self.calls >= ceiling:
+            self.log("info", f"  AI budget spent ({self.calls}/{self.budget} calls"
+                             + ("" if reserved else ", report reserve held back")
+                             + ") — skipping")
             return None
         self.calls += 1
         # Mask again on the way out. The evidence renderer already redacts, and
@@ -645,7 +656,7 @@ class Assistant:
             "could do next."
         )
 
-        raw = self._ask_json(prompt, max_tokens=4000)
+        raw = self._ask_json(prompt, max_tokens=4000, reserved=True)
         if not raw:
             return None
 
