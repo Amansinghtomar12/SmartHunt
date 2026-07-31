@@ -227,6 +227,10 @@ class Scanner:
         # in the scan log rather than at construction time.
         self.ai = None
         self.ai_paths: set[str] = set()   # extra content-discovery paths it asked for
+        # What the user chose before pressing Start. AI tuning is measured
+        # against this, so it can correct a scan that is too shallow without
+        # replacing it with a far heavier one on the user's own machine.
+        self.user_limits = {key: getattr(config, key) for key in ai.TUNABLE}
 
     # --- control ----------------------------------------------------------
     def start(self):
@@ -410,13 +414,14 @@ class Scanner:
             return
         self.log("stage", f"▶ AI assist — reviewing progress ({phase})")
         advice = self.ai.advise(self._ai_context(phase, live, urls, findings),
-                                self.config.target)
+                                self.config.target, limits=self.user_limits)
         if not advice:
             return
 
         if advice["assessment"]:
             self.log("info", f"  {advice['assessment']}")
-        was_exhaustive = self.config.exhaustive
+        for refusal in advice.get("clamped", []):
+            self.log("warn", f"  {refusal}")
         for adjustment in advice["adjustments"]:
             setting, value = adjustment["setting"], adjustment["value"]
             before = getattr(self.config, setting)
@@ -425,10 +430,6 @@ class Scanner:
             setattr(self.config, setting, value)
             self.log("found", f"  adjusted {setting}: {before} → {value}"
                               + (f" ({adjustment['why']})" if adjustment["why"] else ""))
-        if self.config.exhaustive and not was_exhaustive:
-            # Switching exhaustive on has to bring its raised caps with it, or
-            # the extra rounds run against the quick-scan ceilings.
-            self._apply_exhaustive_limits()
         if advice["focus_paths"]:
             fresh = set(advice["focus_paths"]) - self.ai_paths
             self.ai_paths |= fresh
@@ -752,10 +753,17 @@ class Scanner:
             res.hosts = [hr.as_dict() for hr in sorted(live.values(), key=lambda h: h.host)]
             findings.sort(key=lambda f: SEVERITY_RANK.get(f.severity, 5))
 
-            # Triage always runs: the point of the scan is one reportable bug,
-            # not a list. It re-verifies its pick and captures fresh evidence,
-            # so it needs the live session before the scan tears down.
-            if not self.stop_event.is_set():
+            # Triage always runs — including after Stop. Someone who lets a scan
+            # run for twenty minutes and then stops it still wants the finding it
+            # already has, and throwing it away because the last stage was cut
+            # short is the wrong trade: verification is a handful of requests,
+            # not another sweep.
+            # A normal finish always triages, even with nothing to show, so the
+            # report pane says "nothing reportable" rather than staying blank.
+            # A stopped scan triages only if it actually found something.
+            if findings or not self.stop_event.is_set():
+                if self.stop_event.is_set():
+                    self.log("info", "Stopped — triaging what was found so far")
                 report = triage.build_report(findings, self.session, self.log,
                                              target=cfg.target)
                 res.report = {
@@ -774,7 +782,10 @@ class Scanner:
                     # evidence gate. If the rewrite fails its own checks, the
                     # verified template stands — the AI cannot create, promote
                     # or soften a finding, only phrase one.
-                    if self.ai and cfg.ai_report:
+                    # Not after Stop: someone who just asked the scan to end does
+                    # not want to wait another minute on a model call. They get
+                    # the verified report immediately instead.
+                    if self.ai and cfg.ai_report and not self.stop_event.is_set():
                         self.log("stage", "▶ AI assist — writing the report")
                         host = report["finding"].host or cfg.target
                         written = self.ai.write_report(report, host)

@@ -457,15 +457,38 @@ TUNABLE = {
 #: A suggested path must look like a path and nothing else — no traversal, no
 #: query string, no scheme. SmartHunt requests these, so a model that decided to
 #: be clever with ``../`` would be sending traversal probes nobody asked for.
+#: Settings the assistant may only turn *down*.
+#:
+#: ``exhaustive`` multiplies the whole workload — it raises the page cap to
+#: 5000, the JS cap to 4000 and loops discovery for up to ten rounds. It is a
+#: deliberate opt-in in both UIs, and a model flipping it on turns a scan
+#: someone started on a laptop into one that pins the machine for an hour.
+#: ``threads`` is the same argument at a smaller scale. The assistant may still
+#: reduce either, because backing off is never a surprise.
+ONLY_REDUCE = {"threads", "exhaustive"}
+
+#: How far above the user's *own* setting a limit may be pushed. Tuning should
+#: correct a scan that is too shallow, not quietly replace it with a different,
+#: far heavier scan than the one that was started.
+GROWTH_LIMIT = 4
+
 SAFE_PATH = re.compile(r"^/?[A-Za-z0-9._~/-]{1,64}$")
 TRAVERSAL = re.compile(r"\.\.")
 SAFE_HOST = re.compile(r"^[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]$")
 
 
-def sanitise_advice(advice: dict, apex: str) -> dict:
-    """Keep only what is safe to act on."""
+def sanitise_advice(advice: dict, apex: str, limits: dict | None = None) -> dict:
+    """Keep only what is safe to act on.
+
+    ``limits`` is what the *user* configured before pressing Start. Suggestions
+    are measured against it, so tuning stays a correction to the scan that was
+    started rather than a licence to start a much bigger one on someone else's
+    hardware. Rejections are reported in ``out["clamped"]`` so the scan log can
+    say what was turned down.
+    """
+    limits = limits or {}
     out = {"assessment": _clean(advice.get("assessment", ""))[:600],
-           "adjustments": [], "focus_paths": [], "focus_hosts": [],
+           "adjustments": [], "focus_paths": [], "focus_hosts": [], "clamped": [],
            "notes": [_clean(n)[:200] for n in (advice.get("notes") or [])[:6]]}
 
     for item in (advice.get("adjustments") or [])[:8]:
@@ -486,6 +509,22 @@ def sanitise_advice(advice: dict, apex: str) -> dict:
                 value = max(low, min(high, int(raw)))
             except (TypeError, ValueError):
                 continue
+
+        baseline = limits.get(setting)
+        if baseline is not None:
+            if setting in ONLY_REDUCE and value > baseline:
+                out["clamped"].append(
+                    f"refused to raise {setting} to {value} — it would make the "
+                    f"scan heavier than you asked for")
+                continue
+            if kind == "int" and value > baseline:
+                ceiling = max(low, baseline * GROWTH_LIMIT)
+                if value > ceiling:
+                    out["clamped"].append(
+                        f"capped {setting} at {ceiling} instead of {value} "
+                        f"({GROWTH_LIMIT}× your setting of {baseline})")
+                    value = ceiling
+
         out["adjustments"].append({"setting": setting, "value": value,
                                    "why": _clean(item.get("why", ""))[:200]})
 
@@ -566,7 +605,7 @@ class Assistant:
         return payload
 
     # --- job 1: adjust the scan ------------------------------------------
-    def advise(self, context: dict, apex: str) -> dict | None:
+    def advise(self, context: dict, apex: str, limits: dict | None = None) -> dict | None:
         """Ask for configuration adjustments given what the scan has seen."""
         prompt = (
             "Tune a reconnaissance scan that is already running. Here is its "
@@ -587,12 +626,16 @@ class Assistant:
               "Only suggest an adjustment when the state actually justifies it; "
               "an empty adjustments list is a valid answer. Every hostname must "
               "end with the authorised scope. Suggest reconnaissance settings "
-              "only — do not suggest exploitation."
+              "only — do not suggest exploitation.\n\n"
+              "This scan is running on the tester's own machine. Do not turn "
+              "'exhaustive' on and do not raise 'threads' — those make the run "
+              "heavier than they chose. Keep any increase modest relative to "
+              "the current settings."
         )
         raw = self._ask_json(prompt, max_tokens=2000)
         if not raw:
             return None
-        advice = sanitise_advice(raw, apex)
+        advice = sanitise_advice(raw, apex, limits)
         self.advice_log.append(advice)
         return advice
 

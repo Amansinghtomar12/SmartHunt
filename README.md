@@ -114,6 +114,7 @@ Everything is also saved into a `smarthunt-results/` folder next to the project.
 | Browser page is blank | The terminal running the server must stay open. And use the exact address it printed. |
 | `0/112 external tools found` | **This is fine.** SmartHunt has its own built-in version of every step. Extra tools are optional. |
 | Scan finds nothing | Check the site is online, and that you typed it without `https://`. |
+| Scan is eating your CPU | Press **■ STOP** in the sidebar — it winds down and still gives you the report for whatever it found. Then lower **Threads** and **Max pages** in Options before the next run. `--exhaustive` is the heaviest setting; leave it off unless you want a long run. |
 | `AI assist requested but unavailable` | You passed `--ai` but no Claude was found. Either install Claude Code and log in, or set an API key — see [Setting up the AI helper](#setting-up-the-ai-helper). Or drop `--ai`; everything else still runs. |
 
 Still stuck? Run `python3 smarthunt.py --tools`. If that prints a list, your
@@ -233,6 +234,7 @@ ever sees a bug that has already passed it, and can only put it into words.
 | **Every sentence is checked** | Wishy-washy words (`may`, `could`, `possibly`, `appears`), scary claims that weren't proved (`RCE`, `account takeover`), a web address that isn't in the proof, an error code that never happened, or a changed severity → **the whole thing is thrown away** and the tool's own report is used instead |
 | **Only 8 settings** | It can suggest settings, not conclusions. Only eight are accepted, each limited to what the sliders already allow. It cannot touch the target, your permission checkbox, or the proof check |
 | **It cannot leave your scope** | A sub-site it suggests is ignored unless it belongs to the domain you're allowed to test |
+| **It can't make the scan heavier** | It may never switch **exhaustive** on or raise **threads** — those are your machine's workload, your choice. Other limits can rise at most 4× what you set. Anything it tries beyond that is refused and written in the log |
 | **It has a budget** | A hard limit on how many times it can be called per scan (8 by default), with one call always held back so the report still gets written on a long run |
 
 When it oversteps, the log tells you exactly what it tried:
