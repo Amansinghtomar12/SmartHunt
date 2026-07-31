@@ -22,8 +22,9 @@ It comes in three forms, all doing the same thing:
 - a **command line** version for servers
 
 There is also an optional **AI helper** that adjusts the scan while it runs and
-writes the report for you. It works with the Claude plan you already pay for.
-[Jump to that section →](#ai-helper-optional)
+writes the report for you. It runs on a Claude Pro/Max subscription if you have
+one, or an Anthropic API key if you don't — and the tool works perfectly well
+with neither. [Jump to that section →](#ai-helper-optional)
 
 ---
 
@@ -113,6 +114,7 @@ Everything is also saved into a `smarthunt-results/` folder next to the project.
 | Browser page is blank | The terminal running the server must stay open. And use the exact address it printed. |
 | `0/112 external tools found` | **This is fine.** SmartHunt has its own built-in version of every step. Extra tools are optional. |
 | Scan finds nothing | Check the site is online, and that you typed it without `https://`. |
+| `AI assist requested but unavailable` | You passed `--ai` but no Claude was found. Either install Claude Code and log in, or set an API key — see [Setting up the AI helper](#setting-up-the-ai-helper). Or drop `--ai`; everything else still runs. |
 
 Still stuck? Run `python3 smarthunt.py --tools`. If that prints a list, your
 install is fine and the problem is the target or your network.
@@ -247,25 +249,52 @@ single unproven sentence — so this one fails safe. No AI installed, a refused
 request, a broken reply, a report that overreaches: every one of those quietly
 falls back to the normal report, and your scan is unaffected.
 
-### Does it use my Claude plan?
+### Setting up the AI helper
 
-Yes — through the **Claude Code** app, which logs in with your normal Claude
-account (Pro or Max). No API key, no second bill.
+SmartHunt finds Claude on its own. There are three situations — find yours
+below. **You don't need any of them for the tool to work.**
 
-| | What you need | Who pays |
+| Your situation | What to do | Who pays |
 |---|---|---|
-| **Claude Code** (easiest) | `claude` installed and logged in | Your **Claude subscription** — the plan you already have |
-| **Anthropic API** | `pip install anthropic` and an API key (or `ant auth login`) | Billed separately as API usage |
+| **A.** You have a **Claude Pro or Max subscription** | Install Claude Code and log in — nothing else | Your existing subscription. No API key, no second bill |
+| **B.** You have **no subscription**, or you'd rather use the API | Get an API key and `pip install anthropic` | Anthropic API, pay per use — billed separately |
+| **C.** You have **neither**, or you don't want AI | Nothing. Leave the switch off | Nobody. The scan runs exactly the same |
 
-A Max plan is a *subscription*, not API credit — they're two different things.
-The Claude Code route is what lets SmartHunt run on the plan you already pay for.
-**If you can type `claude` in a terminal, SmartHunt can use it.**
+**A — with a Pro or Max subscription.** A subscription is not the same thing as
+API credit; the two are billed separately. Claude Code is the bridge: it signs
+in with your ordinary Claude account, and SmartHunt just talks to it.
 
-Check what it found:
+```bash
+npm install -g @anthropic-ai/claude-code    # other install methods: code.claude.com/docs
+claude                                      # opens a browser, log in once
+```
+
+**If you can type `claude` in a terminal, SmartHunt can use it.** Nothing to
+configure in SmartHunt itself.
+
+**B — with an API key instead.** Create a key at
+[console.anthropic.com](https://console.anthropic.com), then:
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."       # Windows: setx ANTHROPIC_API_KEY "sk-ant-..."
+```
+
+This is ordinary API usage and is charged to that key — it is *not* covered by a
+Pro or Max subscription. (If you use Anthropic's `ant` CLI, `ant auth login`
+works too — SmartHunt reads the same login.)
+
+**C — no AI at all.** Skip this whole section. Every scan, every check and the
+proof-checked report work identically; you just get the standard report wording
+instead of a written-up one.
+
+### Check which one SmartHunt found
 
 ```bash
 python3 smarthunt.py --tools
 ```
+
+The last block of the output tells you:
 
 ```
 AI assist
@@ -273,7 +302,13 @@ AI assist
   enable with --ai (off by default)
 ```
 
-A green `●` means you're set. Then:
+| What you see | Meaning |
+|---|---|
+| `● Claude Code CLI` | Situation A — running on your subscription |
+| `● Anthropic SDK` | Situation B — running on your API key |
+| `○ no provider …` | Situation C — AI is off; the line tells you what to install |
+
+With a green `●`, turn it on:
 
 ```bash
 python3 smarthunt.py --cli example.com --ai                  # adjust + write
@@ -573,5 +608,6 @@ data.
 - Python 3.9 or newer
 - `requests` — the only thing you must install
 - Tkinter, for the desktop app only — `--web` and `--cli` work without it
-- Claude Code, only if you want the AI helper — optional
+- Claude Code (with a Pro/Max subscription) **or** an Anthropic API key — only
+  if you want the AI helper, and only one of the two
 - Any of the 112 external tools you feel like installing — all optional
