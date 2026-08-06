@@ -21,6 +21,11 @@ It comes in three forms, all doing the same thing:
 - a **web page** you open in your browser
 - a **command line** version for servers
 
+> **New: a Go engine is being built** in [`engine-go/`](engine-go/) for raw
+> speed and scale. It already runs the core pipeline in about a second and
+> gets the no-false-positive rule right by construction. The Python tool
+> below remains the full-featured one while the port is completed.
+
 There is also an optional **AI helper** that adjusts the scan while it runs and
 writes the report for you. It runs on a Claude Pro/Max subscription if you have
 one, or an Anthropic API key if you don't — and the tool works perfectly well
