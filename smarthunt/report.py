@@ -25,11 +25,25 @@ def export_csv(results, path):
     """Write the findings table as CSV (the part most people want in a sheet)."""
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["severity", "host", "finding", "detail", "source"])
-        for f in results.findings:
-            writer.writerow([f.get("severity", ""), f.get("host", ""), f.get("name", ""),
-                             f.get("detail", ""), f.get("source", "")])
+        writer.writerow(["status", "severity", "claimed_severity", "host",
+                         "finding", "detail", "source"])
+        for f in _findings_proven_first(results.findings):
+            writer.writerow([
+                "CONFIRMED" if f.get("proven") else "lead",
+                f.get("severity_shown", f.get("severity", "")),
+                f.get("severity_claimed", f.get("severity", "")),
+                f.get("host", ""), f.get("name", ""),
+                f.get("detail", ""), f.get("source", "")])
     return path
+
+
+def _findings_proven_first(findings):
+    """Confirmed findings first, then leads; each block by severity."""
+    from .modules import SEVERITY_RANK
+    return sorted(findings, key=lambda f: (
+        0 if f.get("proven") else 1,
+        SEVERITY_RANK.get(f.get("severity_claimed", f.get("severity", "")), 9),
+        f.get("name", "")))
 
 
 def export_markdown(results, path):
@@ -131,10 +145,18 @@ def export_html(results, path):
         color = SEVERITY_COLORS.get(str(value).lower(), "#64748b")
         return f'<span class="sev" style="background:{color}">{esc(value).upper()}</span>'
 
+    def status_badge(f):
+        if f.get("proven"):
+            return '<span class="sev" style="background:#15803d">CONFIRMED</span>'
+        claimed = esc(f.get("severity_claimed", f.get("severity", ""))).upper()
+        return (f'<span class="sev" style="background:#475569">LEAD</span>'
+                f'<span class="muted-sm"> claimed {claimed}</span>')
+
     findings_rows = [
-        [sev(f.get("severity")), esc(f.get("host")), esc(f.get("name")),
+        [status_badge(f), sev(f.get("severity_shown", f.get("severity"))),
+         esc(f.get("host")), esc(f.get("name")),
          f'<code>{esc(f.get("detail"))[:220]}</code>', esc(f.get("source"))]
-        for f in results.findings
+        for f in _findings_proven_first(results.findings)
     ]
     secret_rows = [
         [sev(s.get("severity")), esc(s.get("type")), f'<code>{esc(s.get("value"))}</code>',
@@ -197,6 +219,7 @@ code {{ font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(-
 .list {{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px;
          max-height:420px; overflow:auto; font:12.5px/1.6 ui-monospace,Menlo,monospace; }}
 .empty {{ color:var(--muted); font-style:italic; }}
+.muted-sm {{ color:var(--muted); font-size:11px; }}
 a {{ color:var(--accent); text-decoration:none; }} a:hover {{ text-decoration:underline; }}
 footer {{ margin-top:36px; padding-top:14px; border-top:1px solid var(--line);
           color:var(--muted); font-size:12px; }}
@@ -211,7 +234,10 @@ footer {{ margin-top:36px; padding-top:14px; border-top:1px solid var(--line);
 <div class="cards">{cards}</div>
 
 <h2>Findings <span class="count">{len(results.findings)}</span></h2>
-{table(["Severity", "Host", "Finding", "Detail", "Source"], findings_rows)}
+<p class="empty">Only <strong>CONFIRMED</strong> rows carry captured proof. <strong>LEAD</strong>
+rows are unverified — a version banner, an unconfirmed secret, or an external
+tool's say-so — worth checking by hand but not a finding on their own.</p>
+{table(["Status", "Severity", "Host", "Finding", "Detail", "Source"], findings_rows)}
 
 <h2>Potential secrets in JavaScript <span class="count">{len(results.secrets)}</span></h2>
 {table(["Severity", "Type", "Value", "Source file"], secret_rows)}

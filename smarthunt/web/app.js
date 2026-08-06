@@ -351,18 +351,34 @@ function renderResults(res) {
      <div class="lbl">${esc(label)}</div></div>`).join('');
   if (window.SmartHuntFX) SmartHuntFX.animateCards($('#cards'));
 
+  // Severity counts reflect only CONFIRMED findings — a lead is not a critical.
   const counts = {};
-  (res.findings || []).forEach((f) => {
-    counts[f.severity] = (counts[f.severity] || 0) + 1;
+  (res.findings || []).filter((f) => f.proven).forEach((f) => {
+    const s = f.severity_shown || f.severity;
+    counts[s] = (counts[s] || 0) + 1;
   });
   $('#sevList').innerHTML = SEVERITIES.map((s) =>
     `<div class="sev-row"><span class="pill ${s}">${s.toUpperCase()}</span>
      <span class="n">${counts[s] || 0}</span></div>`).join('');
 
+  // Cells stay strings so the table's filter and sort keep working; the status
+  // token carries the claimed severity for leads, which the pill renderer reads.
+  const statusToken = (f) => f.proven ? 'CONFIRMED'
+    : `LEAD|${(f.severity_claimed || '').toUpperCase()}`;
+  const statusPill = (v) => {
+    if (v === 'CONFIRMED') return '<span class="pill confirmed">CONFIRMED</span>';
+    const claimed = String(v).split('|')[1] || '';
+    return '<span class="pill lead">LEAD</span>'
+      + `<span class="muted-sm"> claimed ${esc(claimed)}</span>`;
+  };
+  const findingsSorted = (res.findings || []).slice().sort((a, b) =>
+    (a.proven ? 0 : 1) - (b.proven ? 0 : 1));
+
   renderTable('findings',
-    ['Severity', 'Host', 'Finding', 'Detail', 'Source'],
-    (res.findings || []).map((f) => [f.severity, f.host, f.name, f.detail, f.source]),
-    { cell: { 0: sevPill, 3: (v) => `<code>${esc(v)}</code>` } });
+    ['Status', 'Severity', 'Host', 'Finding', 'Detail', 'Source'],
+    findingsSorted.map((f) => [statusToken(f), f.severity_shown || f.severity,
+                               f.host, f.name, f.detail, f.source]),
+    { cell: { 0: statusPill, 1: sevPill, 4: (v) => `<code>${esc(v)}</code>` } });
 
   renderTable('secrets',
     ['Severity', 'Type', 'Value', 'Source file'],

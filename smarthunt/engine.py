@@ -171,8 +171,13 @@ class ScanResults:
         return (self.finished or time.time()) - self.started
 
     def stats(self) -> dict:
-        crit = sum(1 for f in self.findings if f["severity"] == "critical")
-        high = sum(1 for f in self.findings if f["severity"] == "high")
+        # "Confirmed" and "Critical/High" count only findings we actually
+        # proved (evidence captured, high confidence, or the two-account IDOR).
+        # Everything else is a lead and must not inflate the headline — that
+        # over-count was the false-positive complaint.
+        proven = [f for f in self.findings if f.get("proven")]
+        crit_high = sum(1 for f in proven
+                        if f.get("severity_shown", f.get("severity")) in ("critical", "high"))
         return {
             "Subdomains": len(self.subdomains),
             "Live hosts": len(self.hosts),
@@ -183,7 +188,8 @@ class ScanResults:
             "Parameters": len(self.params.get("names", [])),
             "Secrets": len(self.secrets),
             "Findings": len(self.findings),
-            "Critical/High": crit + high,
+            "Confirmed": len(proven),
+            "Critical/High": crit_high,
         }
 
     def to_json(self) -> str:
@@ -231,6 +237,7 @@ class Scanner:
         # against this, so it can correct a scan that is too shallow without
         # replacing it with a far heavier one on the user's own machine.
         self.user_limits = {key: getattr(config, key) for key in ai.TUNABLE}
+        self._seen_secrets: set = set()   # (type, value) already turned into a finding
 
     # --- control ----------------------------------------------------------
     def start(self):
@@ -577,8 +584,16 @@ class Scanner:
                     base_domain=cfg.target, threads=max(5, cfg.threads // 3),
                     max_files=cfg.max_js_files)
                 res.js_endpoints = analysis["endpoints"]
+                # Deduplicate by (type, value): the same bundle served from 90
+                # subdomains used to yield 90 identical "secret" findings, which
+                # is most of where the false-positive flood came from. One value
+                # is one lead, however many hosts echo it.
                 res.secrets = analysis["secrets"]
                 for secret in analysis["secrets"]:
+                    key = (secret["type"], secret["value"])
+                    if key in self._seen_secrets:
+                        continue
+                    self._seen_secrets.add(key)
                     findings.append(Finding(
                         host=cfg.target, name=f"Secret in JS: {secret['type']}",
                         severity=secret["severity"],
@@ -799,7 +814,10 @@ class Scanner:
                         "finding": report["finding"].as_dict(),
                     })
 
-            res.findings = [f.as_dict() for f in findings]
+            # Enrich with the honest proven/lead labelling so the findings list,
+            # the stat tiles and every export stop grading unverified inference
+            # as critical.
+            res.findings = [triage.enrich(f) for f in findings]
             if self.ai:
                 res.ai = self.ai.summary()
 

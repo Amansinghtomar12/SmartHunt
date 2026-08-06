@@ -81,6 +81,52 @@ OWASP_BY_NAME = [
 ]
 
 
+#: Sources whose findings are first-hand proof by construction.
+_PROVEN_SOURCES = {"accesscontrol"}
+
+
+def classify_confidence(finding) -> tuple[bool, str]:
+    """Return ``(proven, shown_severity)`` — the honest label for the finding list.
+
+    This is the fix for the "every critical was a false positive" complaint. The
+    scan's raw output mixes two very different things and used to grade them the
+    same:
+
+    * **Proof** — an active check that sent a request and captured the response
+      showing the flaw (the OWASP injections, the two-account IDOR).
+    * **A lead** — a version banner matched to a CVE, a secret string that might
+      be a placeholder, a takeover fingerprint, an external tool's say-so we
+      have not reproduced. Useful to look at, but *not demonstrated*.
+
+    A lead dressed as ``critical`` is exactly a false positive. So a finding
+    keeps its severity only if we captured evidence of the behaviour ourselves
+    and rated it high-confidence; everything else is shown as ``info`` and
+    flagged a lead. Nothing is hidden — leads still appear, labelled honestly —
+    but they never inflate the critical/high headline again.
+    """
+    if finding.source in _PROVEN_SOURCES:
+        return True, finding.severity
+    ev = finding.evidence
+    has_evidence = ev is not None and bool(getattr(ev, "exchanges", None))
+    if has_evidence and finding.confidence == "high":
+        return True, finding.severity
+    return False, "info"
+
+
+def enrich(finding) -> dict:
+    """``Finding.as_dict()`` plus the honest proven/severity labelling."""
+    data = finding.as_dict()
+    proven, shown = classify_confidence(finding)
+    data["proven"] = proven
+    data["severity_claimed"] = finding.severity
+    data["severity_shown"] = shown
+    # ``severity`` is what every display reads, so make it the honest one. The
+    # detector's original grade is preserved in ``severity_claimed`` for anyone
+    # who wants to see what the raw check thought.
+    data["severity"] = shown
+    return data
+
+
 def classify_owasp(finding) -> str:
     """Give a built-in finding its OWASP category if the checker did not."""
     if finding.owasp:

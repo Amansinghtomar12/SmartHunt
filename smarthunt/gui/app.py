@@ -481,8 +481,8 @@ class SmartHuntApp(tk.Tk):
 
         # Result tabs
         self.tbl_findings = ResultTable(
-            self.tabs, ["Severity", "Host", "Finding", "Detail", "Source"],
-            widths=[85, 200, 250, 460, 90])
+            self.tabs, ["Status", "Severity", "Host", "Finding", "Detail", "Source"],
+            widths=[110, 80, 190, 240, 420, 90])
         self.tabs.add(self.tbl_findings, text=" Findings ")
 
         self.tbl_secrets = ResultTable(
@@ -848,18 +848,32 @@ class SmartHuntApp(tk.Tk):
         for label, card in self.cards.items():
             self._count_up(card, stats.get(label, 0))
 
+        # The severity breakdown counts only confirmed findings — a lead is not
+        # a critical, and pretending otherwise was the false-positive complaint.
         counts = {}
         for finding in results.findings:
-            sev = finding.get("severity", "info")
+            if not finding.get("proven"):
+                continue
+            sev = finding.get("severity_shown", finding.get("severity", "info"))
             counts[sev] = counts.get(sev, 0) + 1
         for sev, lbl in self.sev_labels.items():
             lbl.config(text=f"{sev.upper():<10} {counts.get(sev, 0)}")
 
         self._render_report(results)
+
+        def _status(f):
+            if f.get("proven"):
+                return "CONFIRMED"
+            return f"lead (was {f.get('severity_claimed', '?')})"
+
+        findings_sorted = sorted(
+            results.findings, key=lambda f: (0 if f.get("proven") else 1))
         self.tbl_findings.set_rows(
-            [[f.get("severity", ""), f.get("host", ""), f.get("name", ""),
-              f.get("detail", ""), f.get("source", "")] for f in results.findings],
-            tags=[f.get("severity", "info") for f in results.findings])
+            [[_status(f), f.get("severity_shown", f.get("severity", "")),
+              f.get("host", ""), f.get("name", ""), f.get("detail", ""),
+              f.get("source", "")] for f in findings_sorted],
+            tags=[(f.get("severity_shown", "info") if f.get("proven") else "info")
+                  for f in findings_sorted])
 
         self.tbl_secrets.set_rows(
             [[s.get("severity", ""), s.get("type", ""), s.get("value", ""), s.get("source", "")]

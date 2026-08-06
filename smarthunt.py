@@ -156,9 +156,12 @@ def run_cli(args):
               f"evidence.{C['reset']}")
 
     if results.findings:
-        crit = sum(1 for f in results.findings if f["severity"] in ("critical", "high"))
-        print(f"\n{C['dim']}({len(results.findings)} raw findings in total, {crit} "
-              f"critical/high — full list in the exported JSON and CSV.){C['reset']}")
+        proven = [f for f in results.findings if f.get("proven")]
+        crit = sum(1 for f in proven if f.get("severity_shown") in ("critical", "high"))
+        leads = len(results.findings) - len(proven)
+        print(f"\n{C['dim']}({len(proven)} confirmed finding(s), {crit} critical/high; "
+              f"{leads} unverified lead(s) to check by hand — full list in the "
+              f"exported JSON and CSV.){C['reset']}")
 
     outdir = os.path.join(args.out, apex.replace(".", "_"))
     written = report.export_all(results, outdir)
