@@ -3,6 +3,7 @@ package scan
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,20 +16,39 @@ func vulnServer() *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
-		if strings.Contains(id, "'") {
+		// Realistic error-based SQLi: an ODD number of quotes breaks the query
+		// and errors; a balanced pair escapes to a literal and recovers. This is
+		// what lets the differential control confirm a real injection instead of
+		// rejecting a naive "errors on any quote" faker.
+		if strings.Count(id, "'")%2 == 1 {
 			w.WriteHeader(500)
 			w.Write([]byte(`You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version near "'" at line 1`))
 			return
 		}
 		w.Write([]byte(`{"id":1,"name":"alice"}`))
 	})
-	mux.HandleFunc("/render", func(w http.ResponseWriter, r *http.Request) {
-		name := r.URL.Query().Get("name")
-		if name == "{{7*13}}" {
-			name = "91"
+	// A safe endpoint that always errors on odd input — the differential must
+	// reject it as "errors on everything", not report SQLi.
+	mux.HandleFunc("/always500", func(w http.ResponseWriter, r *http.Request) {
+		v := r.URL.Query().Get("id")
+		if v != "" && !isAllDigits(v) {
+			w.WriteHeader(500)
+			w.Write([]byte(`You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version`))
+			return
 		}
+		w.Write([]byte(`{"id":1}`))
+	})
+	mux.HandleFunc("/render", func(w http.ResponseWriter, r *http.Request) {
+		// Evaluate any {{a*b}}, so both {{7*13}} and the {{6*6}} confirm probe work.
+		name := evalMul(r.URL.Query().Get("name"))
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<p>Hello " + name + "</p>"))
+	})
+	// A page that always contains "91" but never evaluates — the second-product
+	// differential must reject it.
+	mux.HandleFunc("/fake91", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<p>Order 91 for " + r.URL.Query().Get("name") + "</p>"))
 	})
 	// A safe endpoint: it reflects but HTML-encodes, so XSS must not fire.
 	mux.HandleFunc("/safe", func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +59,34 @@ func vulnServer() *httptest.Server {
 		w.Write([]byte("<p>Results for " + q + "</p>"))
 	})
 	return httptest.NewServer(mux)
+}
+
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// evalMul turns "{{a*b}}" into the product, leaving anything else untouched —
+// a minimal but genuine template evaluator for the test fixture.
+func evalMul(s string) string {
+	if !strings.HasPrefix(s, "{{") || !strings.HasSuffix(s, "}}") {
+		return s
+	}
+	inner := strings.TrimSpace(s[2 : len(s)-2])
+	parts := strings.SplitN(inner, "*", 2)
+	if len(parts) != 2 {
+		return s
+	}
+	a, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	b, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil {
+		return s
+	}
+	return strconv.Itoa(a * b)
 }
 
 func TestActiveChecks(t *testing.T) {
@@ -74,6 +122,20 @@ func TestActiveChecks(t *testing.T) {
 		}
 		if f := c.checkSQLi(srv.URL+"/safe?q=x", "q", base); f != nil {
 			t.Errorf("SQLi falsely fired on a safe endpoint: %+v", f)
+		}
+	})
+
+	// The differential controls must reject the false-positive traps.
+	t.Run("sqli differential rejects errors-on-everything", func(t *testing.T) {
+		base := c.capture("GET", srv.URL+"/always500?id=1", "baseline", nil)
+		if f := c.checkSQLi(srv.URL+"/always500?id=1", "id", base); f != nil {
+			t.Errorf("SQLi falsely fired where the balanced-quote control also errors: %+v", f)
+		}
+	})
+	t.Run("ssti differential rejects a coincidental 91", func(t *testing.T) {
+		base := c.capture("GET", srv.URL+"/fake91?name=x", "baseline", nil)
+		if f := c.checkSSTI(srv.URL+"/fake91?name=x", "name", base); f != nil {
+			t.Errorf("SSTI falsely fired where {{6*6}} does not evaluate to 36: %+v", f)
 		}
 	})
 }

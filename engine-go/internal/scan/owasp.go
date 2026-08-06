@@ -67,9 +67,20 @@ func (c *Client) checkSQLi(rawURL, param string, baseline Exchange) *Finding {
 	if engine == "" {
 		return nil
 	}
+	// Differential control: a balanced pair of quotes is valid escaped SQL, so a
+	// genuinely injectable query recovers and the parser error disappears. If the
+	// control still errors, the endpoint errors on any odd input — not injection.
+	control := c.capture("GET", mutate(rawURL, param, "''"),
+		"control: balanced quotes — a real injection recovers, so the parser error must be ABSENT", nil)
+	for _, e := range sqlErrors {
+		if e.re.MatchString(control.RespBody) {
+			return nil
+		}
+	}
 	ev := &Evidence{Unauthenticated: true}
 	ev.add(baseline)
 	ev.add(probe)
+	ev.add(control)
 	ev.Reproduced = 1 + c.verifyRepeat(probe, func(r Exchange) bool {
 		for _, e := range sqlErrors {
 			if e.re.MatchString(r.RespBody) {
@@ -97,7 +108,7 @@ func (c *Client) checkSQLi(rawURL, param string, baseline Exchange) *Finding {
 
 func (c *Client) checkSSTI(rawURL, param string, baseline Exchange) *Finding {
 	// 7*13 = 91: a distinctive product that plain reflection cannot produce.
-	probe := c.capture("GET", mutate(rawURL, param, "{{7*13}}"), fmt.Sprintf("template expression injected into '%s'", param), nil)
+	probe := c.capture("GET", mutate(rawURL, param, "{{7*13}}"), fmt.Sprintf("template expression {{7*13}} injected into '%s'", param), nil)
 	if probe.Err != "" || !strings.Contains(probe.RespBody, "91") || strings.Contains(probe.RespBody, "{{7*13}}") {
 		return nil
 	}
@@ -105,9 +116,17 @@ func (c *Client) checkSSTI(rawURL, param string, baseline Exchange) *Finding {
 	if strings.Contains(baseline.RespBody, "91") {
 		return nil
 	}
+	// Second, distinct product — the false-positive killer. A page that merely
+	// contains 91, or echoes input, cannot also turn {{6*6}} into 36.
+	confirm := c.capture("GET", mutate(rawURL, param, "{{6*6}}"),
+		"confirm: {{6*6}} must return 36, proving real evaluation not a coincidental 91", nil)
+	if !strings.Contains(confirm.RespBody, "36") || strings.Contains(confirm.RespBody, "{{6*6}}") || strings.Contains(baseline.RespBody, "36") {
+		return nil
+	}
 	ev := &Evidence{Unauthenticated: true}
 	ev.add(baseline)
 	ev.add(probe)
+	ev.add(confirm)
 	ev.Reproduced = 1 + c.verifyRepeat(probe, func(r Exchange) bool {
 		return strings.Contains(r.RespBody, "91") && !strings.Contains(r.RespBody, "{{7*13}}")
 	}, 2)
@@ -115,10 +134,10 @@ func (c *Client) checkSSTI(rawURL, param string, baseline Exchange) *Finding {
 		Host: hostOf(rawURL), Name: fmt.Sprintf("Server-side template injection in '%s'", param),
 		Severity: "critical", Claimed: "critical", Source: "owasp", Confidence: "high",
 		Evidence: ev, OWASP: "A03:2021 Injection", Endpoint: rawURL, Method: "GET", Param: param,
-		Detail:   fmt.Sprintf("'%s' evaluated {{7*13}} to 91 server-side.", param),
+		Detail:   fmt.Sprintf("'%s' evaluated {{7*13}} to 91 and {{6*6}} to 36 server-side.", param),
 		Boundary: "Untrusted input is evaluated by the template engine",
 		Expected: "The expression is rendered literally, not evaluated",
-		Actual:   "The server returned 91, the product of the injected expression",
+		Actual:   "The server returned 91 and 36, the products of the injected expressions",
 		Impact:   "The server evaluated an attacker-supplied template expression.",
 		Remedy: []string{
 			"Never pass user input into the template as code; pass it as data",
@@ -134,9 +153,17 @@ func (c *Client) checkTraversal(rawURL, param string, baseline Exchange) *Findin
 		if probe.Err != "" || !passwdRe.MatchString(probe.RespBody) {
 			continue
 		}
+		// Control: a benign filename must NOT return the passwd signature. If it
+		// does, the endpoint serves that body regardless of input — not traversal.
+		control := c.capture("GET", mutate(rawURL, param, "smarthunt_probe.txt"),
+			"control: a benign filename — the /etc/passwd signature must be ABSENT here", nil)
+		if passwdRe.MatchString(control.RespBody) {
+			continue
+		}
 		ev := &Evidence{Unauthenticated: true}
 		ev.add(baseline)
 		ev.add(probe)
+		ev.add(control)
 		ev.Reproduced = 1 + c.verifyRepeat(probe, func(r Exchange) bool { return passwdRe.MatchString(r.RespBody) }, 2)
 		return &Finding{
 			Host: hostOf(rawURL), Name: fmt.Sprintf("Path traversal in '%s'", param),
@@ -156,6 +183,46 @@ func (c *Client) checkTraversal(rawURL, param string, baseline Exchange) *Findin
 	return nil
 }
 
+// inertContexts are containers where a reflected tag is inert — the browser
+// will not execute it. A surviving tag found only inside one of these is the
+// classic reflected-XSS false positive.
+var inertContexts = [][2]string{
+	{"<textarea", "</textarea>"}, {"<title", "</title>"},
+	{"<!--", "-->"}, {"<script", "</script>"}, {"<style", "</style>"},
+}
+
+// inInertContext reports whether every occurrence of tag sits inside a
+// non-executing container.
+func inInertContext(body, tag string) bool {
+	lb, lt := strings.ToLower(body), strings.ToLower(tag)
+	var positions []int
+	for i := 0; ; {
+		f := strings.Index(lb[i:], lt)
+		if f == -1 {
+			break
+		}
+		positions = append(positions, i+f)
+		i += f + 1
+	}
+	if len(positions) == 0 {
+		return true
+	}
+	for _, pos := range positions {
+		inert := false
+		for _, ctx := range inertContexts {
+			before := strings.LastIndex(lb[:pos], ctx[0])
+			if before != -1 && !strings.Contains(lb[before:pos], ctx[1]) {
+				inert = true
+				break
+			}
+		}
+		if !inert {
+			return false // at least one reflection is in a live context
+		}
+	}
+	return true
+}
+
 func (c *Client) checkXSS(rawURL, param string, baseline Exchange) *Finding {
 	payload := fmt.Sprintf(`'"><svg/onload=alert(%s)>`, marker)
 	probe := c.capture("GET", mutate(rawURL, param, payload), fmt.Sprintf("HTML markup injected into '%s'", param), nil)
@@ -163,10 +230,16 @@ func (c *Client) checkXSS(rawURL, param string, baseline Exchange) *Finding {
 	if probe.Err != "" || !isHTML(probe) || !strings.Contains(probe.RespBody, sig) {
 		return nil
 	}
+	// Context differential: reject a reflection that only lands somewhere inert.
+	if inInertContext(probe.RespBody, sig) {
+		return nil
+	}
 	ev := &Evidence{Unauthenticated: true}
 	ev.add(baseline)
 	ev.add(probe)
-	ev.Reproduced = 1 + c.verifyRepeat(probe, func(r Exchange) bool { return strings.Contains(r.RespBody, sig) }, 2)
+	ev.Reproduced = 1 + c.verifyRepeat(probe, func(r Exchange) bool {
+		return strings.Contains(r.RespBody, sig) && !inInertContext(r.RespBody, sig)
+	}, 2)
 	return &Finding{
 		Host: hostOf(rawURL), Name: fmt.Sprintf("Reflected XSS in '%s'", param),
 		Severity: "medium", Claimed: "medium", Source: "owasp", Confidence: "high",

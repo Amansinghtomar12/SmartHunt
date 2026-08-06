@@ -125,6 +125,9 @@ REGISTRY: tuple[Tool, ...] = (
        f"{GO}hakluke/hakrawler@latest"),
     _t("gospider", CAT_CRAWL, "Fast web spider with JS link extraction",
        f"{GO}jaeles-project/gospider@latest"),
+    _t("github-endpoints", CAT_CRAWL, "Mines endpoints and paths from a domain's "
+       "GitHub code (needs a GITHUB_TOKEN)",
+       f"{GO}gwen001/github-endpoints@latest"),
     _t("urlfinder", CAT_CRAWL, "Passive URL discovery across archive sources",
        f"{GO}projectdiscovery/urlfinder/cmd/urlfinder@latest"),
 
@@ -153,6 +156,9 @@ REGISTRY: tuple[Tool, ...] = (
        f"{GO}tomnomnom/unfurl@latest"),
     _t("qsreplace", CAT_PARAMS, "Replaces query-string values for payload injection",
        f"{GO}tomnomnom/qsreplace@latest"),
+    _t("gf", CAT_PARAMS, "Tags URLs by likely vuln class (xss/sqli/ssrf/redirect/idor) "
+       "so the injectable ones are tested first",
+       f"{GO}tomnomnom/gf@latest  # then: git clone github.com/1ndianl33t/Gf-Patterns ~/.gf"),
 
     # --- Content discovery --------------------------------------------------
     _t("ffuf", CAT_CONTENT, "Fast web fuzzer for directories, files and vhosts",

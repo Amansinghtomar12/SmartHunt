@@ -114,16 +114,35 @@ def _is_html(exchange) -> bool:
 # A03 — Injection
 # --------------------------------------------------------------------------- #
 def _check_sqli(session, url, param, baseline, log) -> Finding | None:
-    """Error-based SQL injection: a quote provokes a database parser error."""
+    """Error-based SQL injection, confirmed by a differential control.
+
+    A single quote must break the query (a parser error appears), *and* a
+    balanced pair of quotes — valid SQL that escapes to a literal quote — must
+    NOT. A server that returns the same error page for every odd input trips the
+    first test and is caught by the second, which is the most common error-based
+    false positive there is.
+    """
     probe = capture(session, "GET", _mutate(url, param, "'"),
-                    note=f"single quote injected into '{param}'")
+                    note=f"single quote injected into '{param}' (should break the query)")
     if probe.error or not probe.response_body:
         return None
     for pattern, engine in SQL_ERRORS:
         if pattern.search(probe.response_body) and not pattern.search(baseline.response_body or ""):
+            # Differential control: two quotes are a valid escaped quote, so a
+            # real injectable query recovers and the error disappears. If the
+            # error is still there, the endpoint errors regardless of syntax —
+            # not injection.
+            control = capture(session, "GET", _mutate(url, param, "''"),
+                              note="control: balanced quotes — a real injection recovers, "
+                                   "so the parser error must be ABSENT here")
+            if pattern.search(control.response_body or ""):
+                log("info", f"  sqli on '{param}' rejected: control (balanced quotes) "
+                            f"errors too — endpoint errors on any input")
+                return None
             ev = Evidence()
             ev.add(baseline)
             ev.add(probe)
+            ev.add(control)
             reproduced, fresh = verify_repeat(
                 session, probe,
                 lambda r: bool(r.response_body and pattern.search(r.response_body)))
@@ -146,22 +165,69 @@ def _check_sqli(session, url, param, baseline, log) -> Finding | None:
     return None
 
 
+#: Containers a reflected tag can land inside where the browser will NOT execute
+#: it — the reflection is real but inert. The single biggest reflected-XSS false
+#: positive, so a surviving tag inside one of these is rejected.
+_INERT_CONTEXTS = (("<textarea", "</textarea>"), ("<title", "</title>"),
+                   ("<!--", "-->"), ("<script", "</script>"), ("<style", "</style>"))
+
+
+def _in_inert_context(body: str, tag: str) -> bool:
+    """True if every occurrence of ``tag`` sits inside a non-executing container."""
+    lowered = body.lower()
+    idx, positions = 0, []
+    needle = tag.lower()
+    while True:
+        found = lowered.find(needle, idx)
+        if found == -1:
+            break
+        positions.append(found)
+        idx = found + 1
+    if not positions:
+        return True
+    for pos in positions:
+        inert = False
+        for opener, closer in _INERT_CONTEXTS:
+            before = lowered.rfind(opener, 0, pos)
+            if before != -1 and lowered.rfind(closer, before, pos) == -1:
+                inert = True   # an opener precedes us with no closer in between
+                break
+        if not inert:
+            return False       # at least one reflection is in a live context
+    return True
+
+
 def _check_xss(session, url, param, baseline, log) -> Finding | None:
-    """Reflected XSS: HTML metacharacters survive into an HTML response."""
+    """Reflected XSS, confirmed by context and reproduction.
+
+    Two things must hold: the injected ``<svg onload>`` element survives
+    unencoded in an HTML response, *and* it lands in a context the browser will
+    actually execute — not inside a ``<textarea>``, ``<title>``, comment,
+    ``<script>`` string or ``<style>`` block. A reflection that only appears
+    inside one of those is inert, and reporting it is the classic reflected-XSS
+    false positive.
+    """
+    tag = f"<svg/onload=alert({MARKER})>"
     payload = f"'\"><svg/onload=alert({MARKER})>"
     probe = capture(session, "GET", _mutate(url, param, payload),
-                    note=f"HTML metacharacters injected into '{param}'")
+                    note=f"HTML markup injected into '{param}' (should survive unencoded)")
     if probe.error or not probe.response_body or not _is_html(probe):
         return None
     # Only a match where the angle brackets survived unencoded is meaningful.
-    if f"<svg/onload=alert({MARKER})>" not in probe.response_body:
+    if tag not in probe.response_body:
+        return None
+    # Context differential: reject a reflection that only lands somewhere inert.
+    if _in_inert_context(probe.response_body, tag):
+        log("info", f"  xss on '{param}' rejected: the tag reflects only inside a "
+                    f"non-executing context (textarea/comment/script)")
         return None
     ev = Evidence()
     ev.add(baseline)
     ev.add(probe)
     reproduced, fresh = verify_repeat(
         session, probe,
-        lambda r: bool(r.response_body and f"<svg/onload=alert({MARKER})>" in r.response_body))
+        lambda r: bool(r.response_body and tag in r.response_body
+                       and not _in_inert_context(r.response_body, tag)))
     ev.reproduced, ev.fresh_session, ev.unauthenticated = reproduced, fresh, True
     return Finding(
         host=urlparse(url).netloc, name=f"Reflected XSS in '{param}'",
@@ -182,30 +248,57 @@ def _check_xss(session, url, param, baseline, log) -> Finding | None:
 
 
 def _check_ssti(session, url, param, baseline, log) -> Finding | None:
-    """Server-side template injection: arithmetic gets evaluated server-side."""
-    for payload, marker in (("{{7*7}}", "49"), ("${7*7}", "49"), ("<%= 7*7 %>", "49")):
+    """Server-side template injection, confirmed by a second distinct product.
+
+    ``{{7*7}}`` returning ``49`` is not enough on its own: a page can contain
+    "49" by coincidence, or echo a hard-coded value. So a candidate must also
+    evaluate a *different* expression to its *different* answer — ``{{6*6}}`` to
+    ``36`` — where neither answer appears in the baseline. Two independent
+    products proving out is real evaluation; a coincidental 49 cannot also
+    conjure a 36.
+    """
+    # (positive payload, its product) and (confirm payload, its product), by syntax.
+    families = (
+        ("{{7*7}}", "49", "{{6*6}}", "36"),      # Jinja2 / Twig / Nunjucks
+        ("${7*7}", "49", "${6*6}", "36"),        # FreeMarker / JSP EL / Thymeleaf
+        ("<%= 7*7 %>", "49", "<%= 6*6 %>", "36"),  # ERB / EJS
+        ("#{7*7}", "49", "#{6*6}", "36"),        # Ruby / some EL
+    )
+    base_body = baseline.response_body or ""
+    for payload, marker, payload2, marker2 in families:
         probe = capture(session, "GET", _mutate(url, param, payload),
-                        note=f"template expression injected into '{param}'")
+                        note=f"template expression {payload} injected into '{param}'")
         if probe.error or not probe.response_body:
             continue
-        if marker in probe.response_body and payload not in probe.response_body \
-                and marker not in (baseline.response_body or ""):
-            ev = Evidence()
-            ev.add(baseline)
-            ev.add(probe)
-            reproduced, fresh = verify_repeat(
-                session, probe,
-                lambda r: bool(r.response_body and marker in r.response_body
-                               and payload not in r.response_body))
-            ev.reproduced, ev.fresh_session, ev.unauthenticated = reproduced, fresh, True
-            return Finding(
+        if not (marker in probe.response_body and payload not in probe.response_body
+                and marker not in base_body):
+            continue
+        # Second, distinct product — the false-positive killer.
+        confirm = capture(session, "GET", _mutate(url, param, payload2),
+                          note=f"confirm: {payload2} must return {marker2}, proving real "
+                               f"evaluation and not a coincidental {marker}")
+        if not (confirm.response_body and marker2 in confirm.response_body
+                and payload2 not in confirm.response_body and marker2 not in base_body):
+            log("info", f"  ssti on '{param}' rejected: {payload} gave {marker} but "
+                        f"{payload2} did not give {marker2} — not real evaluation")
+            return None
+        ev = Evidence()
+        ev.add(baseline)
+        ev.add(probe)
+        ev.add(confirm)
+        reproduced, fresh = verify_repeat(
+            session, probe,
+            lambda r: bool(r.response_body and marker in r.response_body
+                           and payload not in r.response_body))
+        ev.reproduced, ev.fresh_session, ev.unauthenticated = reproduced, fresh, True
+        return Finding(
                 host=urlparse(url).netloc, name=f"Server-side template injection in '{param}'",
                 severity="critical", source="owasp", confidence="high", evidence=ev,
                 owasp=CATEGORIES["A03"], endpoint=url, method="GET", param=param,
-                detail=f"'{param}' containing {payload} returns {marker}.",
+                detail=f"'{param}'={payload} returns {marker} and {payload2} returns {marker2}.",
                 boundary="Untrusted input is evaluated by the server-side template engine",
                 expected=f"{payload} is rendered literally as text",
-                actual=f"The server evaluated the expression and returned {marker}",
+                actual=f"The server evaluated {payload}->{marker} and {payload2}->{marker2}",
                 impact="Input to this parameter is executed as a template expression "
                        "on the server.",
                 remediation=[
@@ -217,7 +310,14 @@ def _check_ssti(session, url, param, baseline, log) -> Finding | None:
 
 
 def _check_traversal(session, url, param, baseline, log) -> Finding | None:
-    """Path traversal: a file outside the web root is returned."""
+    """Path traversal, confirmed by a benign control filename.
+
+    The ``/etc/passwd`` signature (``root:x:0:0``) is strong, but a page could
+    contain it as documentation, or return the same static body for everything.
+    So a positive is confirmed only if a *non-traversal* filename does NOT return
+    the signature — proving the traversal payload is what produced the file, not
+    the endpoint always doing so.
+    """
     for payload in ("../../../../etc/passwd", "....//....//....//etc/passwd",
                     "..%2f..%2f..%2f..%2fetc%2fpasswd"):
         probe = capture(session, "GET", _mutate(url, param, payload),
@@ -226,9 +326,20 @@ def _check_traversal(session, url, param, baseline, log) -> Finding | None:
             continue
         for pattern, what in TRAVERSAL_SIGNATURES:
             if pattern.search(probe.response_body):
+                # Control: a plain filename with no traversal must NOT return the
+                # same file-signature. If it does, the endpoint serves it
+                # regardless of input — not a traversal.
+                control = capture(session, "GET", _mutate(url, param, "smarthunt_probe.txt"),
+                                  note="control: a benign filename — the /etc/passwd "
+                                       "signature must be ABSENT here")
+                if pattern.search(control.response_body or ""):
+                    log("info", f"  traversal on '{param}' rejected: a benign filename "
+                                f"returns the same signature — served regardless of input")
+                    return None
                 ev = Evidence()
                 ev.add(baseline)
                 ev.add(probe)
+                ev.add(control)
                 reproduced, fresh = verify_repeat(
                     session, probe,
                     lambda r: bool(r.response_body and pattern.search(r.response_body)))

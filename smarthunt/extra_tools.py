@@ -115,6 +115,19 @@ ROWS: tuple[Row, ...] = (
     Row("jsubfinder", S_JS, lambda c: ["jsubfinder", "search", "-s"], parse="lines",
         stdin=lambda c: "\n".join(ctx_js(c))),
 
+    # --- more URL discovery --------------------------------------------------
+    # github-endpoints finds paths committed to a domain's public GitHub code —
+    # endpoints that no crawl or archive will ever surface. Needs GITHUB_TOKEN.
+    Row("github-endpoints", S_URLS,
+        lambda c: ["github-endpoints", "-d", _domain(c)], parse="urls", timeout=300),
+    # gf tags collected URLs by likely vuln class so the injectable ones survive
+    # deduplication and reach the OWASP stage first. Harmless where ~/.gf is not
+    # set up (it simply returns nothing).
+    Row("gf", S_URLS, lambda c: ["gf", "xss"], parse="urls", stdin=_urls_text, timeout=120),
+    Row("gf", S_URLS, lambda c: ["gf", "sqli"], parse="urls", stdin=_urls_text, timeout=120),
+    Row("gf", S_URLS, lambda c: ["gf", "ssrf"], parse="urls", stdin=_urls_text, timeout=120),
+    Row("gf", S_URLS, lambda c: ["gf", "redirect"], parse="urls", stdin=_urls_text, timeout=120),
+
     # --- parameters ----------------------------------------------------------
     Row("x8", S_PARAMS, lambda c: ["x8", "-u", (_live_urls(c) or [""])[0],
                                    "-w", c.get("param_wordlist", ""), "-O", "json"],

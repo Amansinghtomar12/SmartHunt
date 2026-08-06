@@ -117,7 +117,7 @@ Everything is also saved into a `smarthunt-results/` folder next to the project.
 | `Address already in use` | Something else is using port 8777. Pick another: `python3 smarthunt.py --web --port 9000`. |
 | `python3: command not found` | Try `python`. On Windows that's the normal name. |
 | Browser page is blank | The terminal running the server must stay open. And use the exact address it printed. |
-| `0/112 external tools found` | **This is fine.** SmartHunt has its own built-in version of every step. Extra tools are optional. |
+| `0/114 external tools found` | **This is fine.** SmartHunt has its own built-in version of every step. Extra tools are optional. |
 | Scan finds nothing | Check the site is online, and that you typed it without `https://`. |
 | Scan is eating your CPU | Press **■ STOP** in the sidebar — it winds down and still gives you the report for whatever it found. Then lower **Threads** and **Max pages** in Options before the next run. `--exhaustive` is the heaviest setting; leave it off unless you want a long run. |
 | `AI assist requested but unavailable` | You passed `--ai` but no Claude was found. Either install Claude Code and log in, or set an API key — see [Setting up the AI helper](#setting-up-the-ai-helper). Or drop `--ai`; everything else still runs. |
@@ -132,7 +132,7 @@ install is fine and the problem is the target or your network.
 **You don't need any of this.** SmartHunt has its own built-in version of every
 step, so a fresh download works straight away.
 
-It can also find and use **112 well-known hacking tools** if you have them
+It can also find and use **114 well-known hacking tools** if you have them
 installed, and gets faster and deeper with each one.
 
 ```bash
@@ -140,7 +140,7 @@ installed, and gets faster and deeper with each one.
 python3 smarthunt.py --tools   # shows which ones it found
 ```
 
-Don't install all 112. Just `subfinder`, `httpx`, `katana` and `nuclei` already
+Don't install all 114. Just `subfinder`, `httpx`, `katana` and `nuclei` already
 make a big difference.
 
 ---
@@ -186,14 +186,30 @@ Critical — and says why. Before writing anything it re-tests the bug twice, tr
 again on a completely fresh session, and blanks out any passwords or keys
 (`DB_PASSWORD=REDACTED_SECRET`) so you can paste the report anywhere safely.
 
-The full list of everything it saw is still saved to JSON and CSV. It's just not
-the headline.
+The full list of everything it saw is still saved to JSON and CSV — but only the
+things SmartHunt **proved itself** ever show as critical or high. A version-matched
+CVE, a key-shaped string in a bundle, an unclaimed-looking CNAME: real leads worth
+a look, but shown as **LEAD — verify by hand**, never as a critical. That gap —
+"every critical turned out to be a false positive" — is exactly what this closes.
+
+**Every active bug is tested twice, differently.** Finding a bug once isn't
+enough, because plenty of servers *look* vulnerable to a single probe:
+
+| The trap | How SmartHunt catches it |
+|---|---|
+| Server returns a SQL error for *any* odd input | After the quote breaks the query, a **balanced pair of quotes** must make the error go away — a real injection recovers, a broken page doesn't |
+| A reflection that never runs (inside a `<textarea>`, comment or `<script>`) | The injected tag must land in a context the browser will actually **execute** |
+| A page that happens to contain `49` | `{{7*7}}` must give `49` **and** `{{6*6}}` must give `36` — one coincidence can't produce two |
+| A page that returns `/etc/passwd` text for every filename | A **benign filename** must *not* return it — proving the traversal payload is what pulled the file |
+
+Only a bug that passes its control *and* reproduces gets a severity. The control
+requests are saved in the report, so a triager sees the proof too.
 
 > **About false positives.** No tool can promise zero, and any tool that promises
 > zero is lying to you. SmartHunt is built to **fail quietly rather than guess**:
 > it drops anything it can't prove, checks whether the "private" data was public
-> all along, repeats the test before believing it, and will happily tell you it
-> found nothing.
+> all along, tests every bug twice before believing it, and will happily tell you
+> it found nothing.
 
 ---
 
@@ -477,7 +493,7 @@ answer looks like, and throws away any guess that matches it.
 
 ---
 
-## The arsenal — 112 tools, all driven for you
+## The arsenal — 114 tools, all driven for you
 
 ![The tool arsenal](docs/arsenal.gif)
 
@@ -589,7 +605,7 @@ python3 smarthunt.py --help
 | `--threads` / `--depth` / `--max-pages` / `--max-js` | Speed and depth |
 | `--stages` / `--all` | Choose exactly which steps run |
 | `--sub-wordlist` / `--content-wordlist` | Use your own word lists |
-| `--tools` | Show which of the 112 tools — and which AI — were found |
+| `--tools` | Show which of the 114 tools — and which AI — were found |
 
 ---
 
@@ -617,4 +633,4 @@ data.
 - Tkinter, for the desktop app only — `--web` and `--cli` work without it
 - Claude Code (with a Pro/Max subscription) **or** an Anthropic API key — only
   if you want the AI helper, and only one of the two
-- Any of the 112 external tools you feel like installing — all optional
+- Any of the 114 external tools you feel like installing — all optional
